@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"github.com/snapcore/snapd/osutil"
 )
 
 // NotFoundError is returned when an assertion can not be found.
@@ -421,6 +423,17 @@ func (db *Database) IsTrustedAccount(accountID string) bool {
 }
 
 var timeNow = time.Now
+
+func MockTimeNow(t time.Time) (restore func()) {
+	osutil.MustBeTestBinary("mocking can only be done in tests")
+	oldTimeNow := timeNow
+	timeNow = func() time.Time {
+		return t
+	}
+	return func() {
+		timeNow = oldTimeNow
+	}
+}
 
 // SetEarliestTime affects how key expiration is checked.
 // Instead of considering current system time, only assume that current time

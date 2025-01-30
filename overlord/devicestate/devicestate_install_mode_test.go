@@ -342,6 +342,17 @@ func (s *deviceMgrInstallModeSuite) SetUpTest(c *C) {
 	})
 	s.AddCleanup(restore)
 
+	// pin time since so model/seed are generated with the same timestamp.
+	// Tests get flaky due to model timestamp's differing by slightly sometimes
+	now := time.Now()
+	restore = assertstest.MockTimeNow(func() time.Time {
+		return now
+	})
+	s.AddCleanup(restore)
+
+	restore = asserts.MockTimeNow(now)
+	s.AddCleanup(restore)
+
 	restore = installLogic.MockSecbootCheckTPMKeySealingSupported(func(tpmMode secboot.TPMProvisionMode) error {
 		c.Check(tpmMode, Equals, secboot.TPMProvisionFull)
 		return fmt.Errorf("TPM not available")

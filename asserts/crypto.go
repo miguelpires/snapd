@@ -256,7 +256,7 @@ func (opgPrivK openpgpPrivateKey) sign(content []byte) (*packet.Signature, error
 	sig := new(packet.Signature)
 	sig.PubKeyAlgo = privk.PubKeyAlgo
 	sig.Hash = openpgpConfig.Hash()
-	sig.CreationTime = time.Now()
+	sig.CreationTime = timeNow()
 
 	h := openpgpConfig.Hash().New()
 	h.Write(content)

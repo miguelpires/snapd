@@ -100,16 +100,6 @@ func ExpiredAccountKeyForTest(authorityID string, pubKey PublicKey) *AccountKey 
 	return MakeAccountKeyForTest(authorityID, pubKey, time.Time{}, 1)
 }
 
-func MockTimeNow(t time.Time) (restore func()) {
-	oldTimeNow := timeNow
-	timeNow = func() time.Time {
-		return t
-	}
-	return func() {
-		timeNow = oldTimeNow
-	}
-}
-
 // define test assertion types to use in the tests
 
 type TestOnly struct {

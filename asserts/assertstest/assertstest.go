@@ -37,6 +37,7 @@ import (
 
 	"github.com/snapcore/snapd/asserts"
 	"github.com/snapcore/snapd/randutil"
+	"github.com/snapcore/snapd/testutil"
 )
 
 // GenerateKey generates a private/public key pair of the given bits. It panics on error.
@@ -178,7 +179,7 @@ func NewAccount(db SignerDB, username string, otherHeaders map[string]interface{
 		otherHeaders["validation"] = "unproven"
 	}
 	if otherHeaders["timestamp"] == nil {
-		otherHeaders["timestamp"] = time.Now().Format(time.RFC3339)
+		otherHeaders["timestamp"] = timeNow().Format(time.RFC3339)
 	}
 	a, err := db.Sign(asserts.AccountType, otherHeaders, nil, keyID)
 	if err != nil {
@@ -199,7 +200,7 @@ func NewAccountKey(db SignerDB, acct *asserts.Account, otherHeaders map[string]i
 		otherHeaders["name"] = "default"
 	}
 	if otherHeaders["since"] == nil {
-		otherHeaders["since"] = time.Now().Format(time.RFC3339)
+		otherHeaders["since"] = timeNow().Format(time.RFC3339)
 	}
 	encodedPubKey, err := asserts.EncodePublicKey(pubKey)
 	if err != nil {
@@ -313,7 +314,7 @@ func NewStoreStack(authorityID string, keys *StoreKeys) *StoreStack {
 	}
 
 	rootSigning := NewSigningDB(authorityID, keys.Root)
-	ts := time.Now().Format(time.RFC3339)
+	ts := timeNow().Format(time.RFC3339)
 	trustedAcct := NewAccount(rootSigning, authorityID, map[string]interface{}{
 		"account-id": authorityID,
 		"validation": "verified",
@@ -465,7 +466,7 @@ func FakeAssertionWithBody(body []byte, headerLayers ...map[string]interface{}) 
 	_, hasTimestamp := headers["timestamp"]
 	_, hasSince := headers["since"]
 	if !(hasTimestamp || hasSince) {
-		headers["timestamp"] = time.Now().Format(time.RFC3339)
+		headers["timestamp"] = timeNow().Format(time.RFC3339)
 	}
 
 	a, err := asserts.Assemble(headers, body, nil, []byte("AXNpZw=="))
@@ -578,13 +579,21 @@ func (sa *SigningAccounts) Signing(accountID string) *SigningDB {
 	panic(fmt.Sprintf("unknown test account-id: %s", accountID))
 }
 
+var timeNow = time.Now
+
+func MockTimeNow(f func() time.Time) (restore func()) {
+	restore = testutil.Backup(&timeNow)
+	timeNow = f
+	return restore
+}
+
 // Model creates a new model for accountID. accountID can also be the account-id of the underlying store stack.
 func (sa *SigningAccounts) Model(accountID, model string, extras ...map[string]interface{}) *asserts.Model {
 	headers := map[string]interface{}{
 		"series":    "16",
 		"brand-id":  accountID,
 		"model":     model,
-		"timestamp": time.Now().Format(time.RFC3339),
+		"timestamp": timeNow().Format(time.RFC3339),
 	}
 	for _, extra := range extras {
 		for k, v := range extra {
