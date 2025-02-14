@@ -61,6 +61,12 @@ func Manager(st *state.State, hookMgr *hookstate.HookManager, runner *state.Task
 	hookMgr.Register(regexp.MustCompile("^save-view-.+$"), func(context *hookstate.Context) hookstate.Handler {
 		return &saveViewHandler{ctx: context}
 	})
+	hookMgr.Register(regexp.MustCompile("^query-view-.+$"), func(context *hookstate.Context) hookstate.Handler {
+		return &hookstate.SnapHookHandler{}
+	})
+	hookMgr.Register(regexp.MustCompile("^load-view-.+$"), func(context *hookstate.Context) hookstate.Handler {
+		return &hookstate.SnapHookHandler{}
+	})
 	hookMgr.Register(regexp.MustCompile("^.+-view-changed$"), func(context *hookstate.Context) hookstate.Handler {
 		return &hookstate.SnapHookHandler{}
 	})
@@ -108,30 +114,31 @@ func (m *ConfdbManager) clearOngoingTransaction(t *state.Task, _ *tomb.Tomb) err
 	return nil
 }
 
-func setOngoingTransaction(st *state.State, account, confdbName, commitTaskID string) error {
-	var commitTasks map[string]string
-	err := st.Get("confdb-commit-tasks", &commitTasks)
+// TODO: eventually this should support many simultaneous read transactions
+func setOngoingTransaction(st *state.State, account, confdbName string) error {
+	var changingConfdbs map[string]bool
+	err := st.Get("confdb-ongoing-tx", &changingConfdbs)
 	if err != nil {
 		if !errors.Is(err, &state.NoStateError{}) {
 			return err
 		}
 
-		commitTasks = make(map[string]string, 1)
+		changingConfdbs = make(map[string]bool, 1)
 	}
 
 	confdbRef := account + "/" + confdbName
-	if taskID, ok := commitTasks[confdbRef]; ok {
-		return fmt.Errorf("internal error: cannot set task %q as ongoing commit task for confdb %s: already have %q", commitTaskID, confdbRef, taskID)
+	if ok := changingConfdbs[confdbRef]; ok {
+		return fmt.Errorf("internal error: cannot set ongoing transaction for confdb %s: already exists", confdbRef)
 	}
 
-	commitTasks[confdbRef] = commitTaskID
-	st.Set("confdb-commit-tasks", commitTasks)
+	changingConfdbs[confdbRef] = true
+	st.Set("confdb-ongoing-tx", changingConfdbs)
 	return nil
 }
 
 func unsetOngoingTransaction(st *state.State, account, confdbName string) error {
-	var commitTasks map[string]string
-	err := st.Get("confdb-commit-tasks", &commitTasks)
+	var changingConfdbs map[string]bool
+	err := st.Get("confdb-ongoing-tx", &changingConfdbs)
 	if err != nil {
 		if errors.Is(err, &state.NoStateError{}) {
 			// already unset, nothing to do
@@ -141,17 +148,17 @@ func unsetOngoingTransaction(st *state.State, account, confdbName string) error 
 	}
 
 	confdbRef := account + "/" + confdbName
-	if _, ok := commitTasks[confdbRef]; !ok {
+	if _, ok := changingConfdbs[confdbRef]; !ok {
 		// already unset, nothing to do
 		return nil
 	}
 
-	delete(commitTasks, confdbRef)
+	delete(changingConfdbs, confdbRef)
 
-	if len(commitTasks) == 0 {
-		st.Set("confdb-commit-tasks", nil)
+	if len(changingConfdbs) == 0 {
+		st.Set("confdb-ongoing-tx", nil)
 	} else {
-		st.Set("confdb-commit-tasks", commitTasks)
+		st.Set("confdb-ongoing-tx", changingConfdbs)
 	}
 
 	return nil
@@ -197,7 +204,7 @@ func (h *saveViewHandler) Error(origErr error) (ignoreErr bool, err error) {
 	st := h.ctx.State()
 
 	var commitTaskID string
-	if err := t.Get("commit-task", &commitTaskID); err != nil {
+	if err := t.Get("tx-task", &commitTaskID); err != nil {
 		return false, err
 	}
 
@@ -220,7 +227,7 @@ func (h *saveViewHandler) Error(origErr error) (ignoreErr bool, err error) {
 		// if we fail to rollback, there's nothing we can do
 		ignoreError := true
 		rollbackTask := setupConfdbHook(st, hooksup.Snap, hooksup.Hook, ignoreError)
-		rollbackTask.Set("commit-task", commitTaskID)
+		rollbackTask.Set("tx-task", commitTaskID)
 		rollbackTask.WaitFor(last)
 		curTask.Change().AddTask(rollbackTask)
 		last = rollbackTask

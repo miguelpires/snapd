@@ -1579,14 +1579,13 @@ func (s JSONDataBag) Copy() JSONDataBag {
 }
 
 // Overwrite replaces the entire databag with the provided data.
-func (s *JSONDataBag) Overwrite(data []byte) error {
-	var unmarshalledBag map[string]json.RawMessage
-	if err := json.Unmarshal(data, &unmarshalledBag); err != nil {
-		return err
+func FromRawData(raw []byte) (JSONDataBag, error) {
+	var databag map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &databag); err != nil {
+		return nil, err
 	}
 
-	*s = JSONDataBag(unmarshalledBag)
-	return nil
+	return JSONDataBag(databag), nil
 }
 
 // JSONSchema is the Schema implementation corresponding to JSONDataBag and it's

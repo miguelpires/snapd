@@ -1,0 +1,61 @@
+type: confdb
+authority-id: developer1
+account-id: developer1
+name: network-ephemeral
+timestamp: 2025-02-14T10:11:32Z
+views:
+  wifi-setup:
+    rules:
+      -
+        request: ssids
+        storage: wifi.ssids
+      -
+        request: ssid
+        storage: wifi.ssid
+      -
+        request: password
+        storage: wifi.psk
+      -
+        request: status
+        storage: wifi.status
+body-length: 483
+sign-key-sha3-384: EAD4DbLxK_kn0gzNCXOs3kd6DeMU3f-L6BEsSEuJGBqCORR0gXkdDxMbOm11mRFu
+
+{
+  "storage": {
+    "schema": {
+      "wifi": {
+        "schema": {
+          "psk": {
+            "ephemeral": true,
+            "type": "string"
+          },
+          "ssid": "string",
+          "ssids": {
+            "type": "array",
+            "unique": true,
+            "values": "string"
+          },
+          "status": {
+            "choices": [
+              "on",
+              "off"
+            ],
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
+
+AcLBUgQAAQoABgUCZ68kbAAAljsQAFNdRtBUlxLSgPMzTGR3n3eZAhiHQaab3FBk3yUBm8MotumZ
+yLg9jy2BgMMx9Wk4jmwhBgfaZVxPZv7g9YqO0LRN5jfNyutBmcFdDHFVYrnwmX62SpGb9Fof+mR8
+70ZMD2x871HQZmTXdirHMIJ7vmvG0S8Lnhi87SOiq2OMVs0wfckOoyX8gk2uoszhpLgAuSJMG3Kj
+f3qwSdyVCrC6CK4zHbN8FPEJ3O4TSA9jUfNbx0c/WFaJ0JoSd9/W4J+8IaT/r/5TxtZaLozX2djD
+fXQHONnFsu1n65o1DlTtiLWjSreXnEQW6UWHymczcKUnpUbqar46tI78TRfTBj34dwpF/YAL495Y
+yRqBB7zD+vU5RFGKfvIAs62a8XHR3d20Mg7o2Qk/QgaY2dPiGVaInekTk3coK6Lv7ZLlBahYyf7e
+gHYXjaCn0pFZ4l2pY/xeQUYNhEO3Fth7UExpLNtm1C1Au1xjinEXmVhcwJzOm3dMb7xIDUAtmHgN
+U6COuW9W5/2mKuyby3ihrN2o+1546N8As+iNrU18JGAIazkDwgr5AhmdMx5eUuh/TvDSsZMunGVk
+Yv4Si3x232I9Lor+IHsxsBA0gDLwIII7etw1ysBgRWQj0Lvvt2yIEkU9n5XrxJ+cM9qtKNbhNzWG
+A3Il/92lO05JcYTI7gdW9ihkCU/Z

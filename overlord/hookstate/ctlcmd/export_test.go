@@ -182,10 +182,10 @@ func MockNewStatusDecorator(f func(ctx context.Context, isGlobal bool, uid strin
 }
 
 func MockConfdbstateGetTransaction(f func(*hookstate.Context, *state.State, *confdb.View) (*confdbstate.Transaction, confdbstate.CommitTxFunc, error)) (restore func()) {
-	old := confdbstateGetTransaction
-	confdbstateGetTransaction = f
+	old := confdbstateGetTransactionToModify
+	confdbstateGetTransactionToModify = f
 	return func() {
-		confdbstateGetTransaction = old
+		confdbstateGetTransactionToModify = old
 	}
 }
 

@@ -106,3 +106,32 @@ execute: |
   # still the same value
   snap get developer1/network/wifi-setup ssid | MATCH "second-custodian"
   resetTestState
+
+  # check that custodians can save ephemeral data and load it back
+  snap remove --purge test-custodian-snap test-failing-custodian-snap test-snap
+  "$TESTSTOOLS"/snaps-state install-local loading-custodian
+
+  snap ack "$TESTSLIB/assertions/network-ephemeral.confdb"
+  snap connect loading-custodian:manage-wifi
+
+  # write some ephemeral data (i.e., password)
+  OLD_CHANGE=$(snap changes | tail -n 2 | head -n 1 | awk '{print $1}')
+  loading-custodian.sh -c 'snapctl set --view :manage-wifi ssid=my-ssid password=my-secret'
+  changeAfterID "$OLD_CHANGE"
+  retry -n 5 --wait 1 sh -c 'snap changes | tail -n 2 | grep "Done.*Modify confdb \"developer1/network-ephemeral\""'
+
+  # the save-view hook sees the expected ephemeral data
+  MATCH 'my-secret' < /var/snap/loading-custodian/common/save-view-manage-wifi-ran
+  # but it's not saved in the databags. We write the ssid but not the password
+  jq -c '.data."confdb-databags".developer1."network-ephemeral".wifi' < /var/lib/snapd/state.json | MATCH '{"ssid":"my-ssid-custodian"}'
+
+  # try to read the ephemeral data
+  OLD_CHANGE=$(snap changes | tail -n 2 | head -n 1 | awk '{print $1}')
+  loading-custodian.sh -c 'snapctl get --view :manage-wifi password' | MATCH "my-secret-query"
+  changeAfterID "$OLD_CHANGE"
+  retry -n 5 --wait 1 sh -c 'snap changes | tail -n 2 | grep "Done.*Load confdb \"developer1/network-ephemeral\""'
+
+  # there was no data saved under "password" in the databags
+  MATCH 'error: error running snapctl: cannot get "password" through developer1/network-ephemeral/wifi-setup: no view data' < /var/snap/loading-custodian/common/load-view-manage-wifi-ran
+  # check that query-view sees the value as loaded by load-view (before appending "-query" it)
+  MATCH "my-secret" < /var/snap/loading-custodian/common/query-view-manage-wifi-ran

@@ -402,34 +402,22 @@ func (c *getCommand) getConfdbValues(ctx *hookstate.Context, plugName string, re
 }
 
 func (c *getCommand) getDatabag(ctx *hookstate.Context, view *confdb.View, pristine bool) (bag confdb.DataBag, err error) {
-	account, confdbName := view.Confdb().Account, view.Confdb().Name
+	//account, confdbName := view.Confdb().Account, view.Confdb().Name
 
-	var tx *confdbstate.Transaction
-	if confdbstate.IsConfdbHook(ctx) {
-		// running in the context of a transaction, so if the referenced confdb
-		// doesn't match that tx, we only allow the caller to read the other confdb
-		t, _ := ctx.Task()
-		tx, _, err = confdbstateGetStoredTransaction(t)
-		if err != nil {
-			return nil, fmt.Errorf("cannot access confdb view %s/%s/%s: cannot get transaction: %v", account, confdbName, view.Name, err)
-		}
-
-		if tx.ConfdbAccount != account || tx.ConfdbName != confdbName {
-			// we're reading a different transaction
-			tx = nil
-		}
+	_, readTxFunc, err := confdbstate.GetTransactionToRead(ctx, ctx.State(), view)
+	if err != nil {
+		return nil, err
 	}
 
-	// reading a view but there's no ongoing transaction for it, make a temporary
-	// transaction just as a pass-through databag
-	if tx == nil {
-		tx, err = confdbstateNewTransaction(ctx.State(), account, confdbName)
-		if err != nil {
-			return nil, err
-		}
+	tx, err := readTxFunc()
+	if err != nil {
+		return nil, err
 	}
 
 	if pristine {
+		if !confdbstate.IsConfdbHook(ctx) {
+			return nil, errors.New("cannot use --pristine in non-confdb hook")
+		}
 		return tx.Pristine(), nil
 	}
 	return tx, nil

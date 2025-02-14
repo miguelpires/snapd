@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/snapcore/snapd/asserts"
 	"github.com/snapcore/snapd/confdb"
@@ -255,17 +256,12 @@ func GetTransactionToModify(ctx *hookstate.Context, st *state.State, view *confd
 		}
 		chg.AddAll(ts)
 
-		commitTask, err := ts.Edge(commitEdge)
-		if err != nil {
-			return "", nil, err
-		}
-
 		clearTxTask, err := ts.Edge(clearTxEdge)
 		if err != nil {
 			return "", nil, err
 		}
 
-		err = setOngoingTransaction(st, account, confdbName, commitTask.ID())
+		err = setOngoingTransaction(st, account, confdbName)
 		if err != nil {
 			return "", nil, err
 		}
@@ -291,28 +287,18 @@ var ensureNow = func(st *state.State) {
 }
 
 const (
-	commitEdge  = state.TaskSetEdge("commit-edge")
 	clearTxEdge = state.TaskSetEdge("clear-tx-edge")
 )
 
 func createChangeConfdbTasks(st *state.State, tx *Transaction, view *confdb.View, callingSnap string) (*state.TaskSet, error) {
-	custodianPlugs, err := getCustodianPlugsForView(st, view)
+	custodians, custodianPlugs, err := getCustodianPlugsForView(st, view)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(custodianPlugs) == 0 {
+	if len(custodians) == 0 {
 		return nil, fmt.Errorf("cannot commit changes to confdb %s/%s: no custodian snap installed", view.Confdb().Account, view.Confdb().Name)
 	}
-
-	custodianNames := make([]string, 0, len(custodianPlugs))
-	for name := range custodianPlugs {
-		custodianNames = append(custodianNames, name)
-	}
-
-	// process the change/save hooks in a deterministic order (useful for testing
-	// and potentially for the snaps themselves)
-	sort.Strings(custodianNames)
 
 	ts := state.NewTaskSet()
 	linkTask := func(t *state.Task) {
@@ -329,7 +315,7 @@ func createChangeConfdbTasks(st *state.State, tx *Transaction, view *confdb.View
 
 	// look for plugs that reference the relevant view and create run-hooks for
 	// them, if the snap has those hooks
-	for _, name := range custodianNames {
+	for _, name := range custodians {
 		plug := custodianPlugs[name]
 		custodian := plug.Snap
 		if _, ok := custodian.Hooks["change-view-"+plug.Name]; !ok {
@@ -342,7 +328,7 @@ func createChangeConfdbTasks(st *state.State, tx *Transaction, view *confdb.View
 		linkTask(chgViewTask)
 	}
 
-	for _, name := range custodianNames {
+	for _, name := range custodians {
 		plug := custodianPlugs[name]
 		custodian := plug.Snap
 		if _, ok := custodian.Hooks["save-view-"+plug.Name]; !ok {
@@ -389,29 +375,32 @@ func createChangeConfdbTasks(st *state.State, tx *Transaction, view *confdb.View
 	commitTask.Set("confdb-transaction", tx)
 	// link all previous tasks to the commit task that carries the transaction
 	for _, t := range ts.Tasks() {
-		t.Set("commit-task", commitTask.ID())
+		t.Set("tx-task", commitTask.ID())
 	}
 	linkTask(commitTask)
-	ts.MarkEdge(commitTask, commitEdge)
 
 	// clear the ongoing tx from the state and unblock other writers waiting for it
 	clearTxTask := st.NewTask("clear-confdb-tx", "Clears the ongoing confdb transaction from state")
 	linkTask(clearTxTask)
-	clearTxTask.Set("commit-task", commitTask.ID())
+	clearTxTask.Set("tx-task", commitTask.ID())
 	ts.MarkEdge(clearTxTask, clearTxEdge)
 
 	return ts, nil
 }
 
-func getCustodianPlugsForView(st *state.State, view *confdb.View) (map[string]*snap.PlugInfo, error) {
+// getCustodians returns the snaps that have connected plugs declaring them as
+// custodians of a confdb view. The list of custodians is sorted. It also
+// returns the plugs as a map of snap names to plugs.
+func getCustodianPlugsForView(st *state.State, view *confdb.View) ([]string, map[string]*snap.PlugInfo, error) {
 	repo := ifacerepo.Get(st)
 	plugs := repo.AllPlugs("confdb")
 
-	custodians := make(map[string]*snap.PlugInfo)
+	var custodians []string
+	custodianPlugs := make(map[string]*snap.PlugInfo)
 	for _, plug := range plugs {
 		conns, err := repo.Connected(plug.Snap.InstanceName(), plug.Name)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(conns) == 0 {
 			continue
@@ -423,7 +412,7 @@ func getCustodianPlugsForView(st *state.State, view *confdb.View) (map[string]*s
 
 		account, confdbName, viewName, err := snap.ConfdbPlugAttrs(plug)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		if view.Confdb().Account != account || view.Confdb().Name != confdbName ||
@@ -434,10 +423,15 @@ func getCustodianPlugsForView(st *state.State, view *confdb.View) (map[string]*s
 		// TODO: if a snap has more than one plug providing access to a view, then
 		// which plug we're getting here becomes unpredictable. We should check
 		// for this at some point (interface connection?)
-		custodians[plug.Snap.SnapName()] = plug
+		custodianPlugs[plug.Snap.SnapName()] = plug
+		custodians = append(custodians, plug.Snap.InstanceName())
 	}
 
-	return custodians, nil
+	// we want to process these in a deterministic order (useful for testing
+	// and potentially for the snaps themselves)
+	sort.Strings(custodians)
+
+	return custodians, custodianPlugs, nil
 }
 
 func getPlugsAffectedByPaths(st *state.State, confdb *confdb.Confdb, storagePaths []string) (map[string][]*snap.PlugInfo, error) {
@@ -494,7 +488,7 @@ func GetStoredTransaction(t *state.Task) (tx *Transaction, saveTxChanges func(),
 	}
 
 	var id string
-	err = t.Get("commit-task", &id)
+	err = t.Get("tx-task", &id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -519,5 +513,163 @@ func IsConfdbHook(ctx *hookstate.Context) bool {
 	return ctx != nil && !ctx.IsEphemeral() &&
 		(strings.HasPrefix(ctx.HookName(), "change-view-") ||
 			strings.HasPrefix(ctx.HookName(), "save-view-") ||
+			strings.HasPrefix(ctx.HookName(), "load-view-") ||
+			strings.HasPrefix(ctx.HookName(), "query-view-") ||
 			strings.HasSuffix(ctx.HookName(), "-view-changed"))
+}
+
+// IsWriteConfdbHook returns true if the hook context belongs to a confdb hook
+// that is expected to use `snapctl set` (both to write and load ephemeral data).
+func IsWriteConfdbHook(ctx *hookstate.Context) bool {
+	return ctx != nil && !ctx.IsEphemeral() &&
+		(strings.HasPrefix(ctx.HookName(), "change-view-") ||
+			strings.HasPrefix(ctx.HookName(), "load-view-") ||
+			strings.HasPrefix(ctx.HookName(), "query-view-"))
+}
+
+type ReadTxFunc func() (*Transaction, error)
+
+func GetTransactionToRead(ctx *hookstate.Context, st *state.State, view *confdb.View) (string, ReadTxFunc, error) {
+	account, confdbName := view.Confdb().Account, view.Confdb().Name
+
+	if IsConfdbHook(ctx) {
+		// running in the context of a transaction, so if the referenced confdb
+		// doesn't match that tx, we only allow the caller to read the other confdb
+		t, _ := ctx.Task()
+		tx, _, err := GetStoredTransaction(t)
+		if err != nil {
+			return "", nil, fmt.Errorf("cannot access confdb view %s/%s/%s: cannot get transaction: %v", account, confdbName, view.Name, err)
+		}
+
+		if tx.ConfdbAccount != account || tx.ConfdbName != confdbName {
+			// TODO: this should be enabled at some point
+			return "", nil, fmt.Errorf("cannot access confdb %s/%s: ongoing transaction for %s/%s", account, confdbName, tx.ConfdbAccount, tx.ConfdbName)
+		}
+
+		// we're reading the tx that this hook is modifying
+		readTxFunc := func() (*Transaction, error) { return tx, nil }
+		return "", readTxFunc, nil
+	}
+	// TODO: add concurrency checks
+
+	// not running in an existing confdb hook context, so create a transaction
+	// and a change to load/modify data
+	tx, err := NewTransaction(st, account, confdbName)
+	if err != nil {
+		return "", nil, fmt.Errorf("cannot access confdb view %s/%s/%s: cannot create transaction: %v", account, confdbName, view.Name, err)
+	}
+
+	var chg *state.Change
+	if ctx == nil || ctx.IsEphemeral() {
+		chg = st.NewChange("load-confdb", fmt.Sprintf("Load confdb \"%s/%s\"", account, confdbName))
+	} else {
+		// we're running in the context of a non-confdb hook, add the tasks to that change
+		task, _ := ctx.Task()
+		chg = task.Change()
+	}
+
+	ts, err := createAccessConfdbTasks(st, tx, view)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if ts == nil {
+		// no hooks to run, just read directly from the databag
+		readTxFunc := func() (*Transaction, error) { return tx, nil }
+		return "", readTxFunc, nil
+	}
+	chg.AddAll(ts)
+
+	err = setOngoingTransaction(st, account, confdbName)
+	if err != nil {
+		return "", nil, err
+	}
+
+	clearTxTask, err := ts.Edge(clearTxEdge)
+	if err != nil {
+		return "", nil, err
+	}
+
+	waitChan := make(chan struct{})
+	st.AddTaskStatusChangedHandler(func(t *state.Task, old, new state.Status) (remove bool) {
+		if t.ID() == clearTxTask.ID() && new.Ready() {
+			close(waitChan)
+			return true
+		}
+		return false
+	})
+
+	startRead := func() (*Transaction, error) {
+		ensureNow(st)
+		ctx.Unlock()
+
+		select {
+		case <-waitChan:
+		case <-time.After(time.Minute):
+			ctx.Lock()
+			return nil, fmt.Errorf("could not read confdb %s/%s after 1 minute", account, confdbName)
+		}
+
+		ctx.Lock()
+		if err := clearTxTask.Get("confdb-transaction", &tx); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	}
+
+	return chg.ID(), startRead, nil
+}
+
+func createAccessConfdbTasks(st *state.State, tx *Transaction, view *confdb.View) (*state.TaskSet, error) {
+	custodians, custodianPlugs, err := getCustodianPlugsForView(st, view)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(custodians) == 0 {
+		return nil, fmt.Errorf("cannot access confdb %s/%s: no custodian snap installed", view.Confdb().Account, view.Confdb().Name)
+	}
+
+	ts := state.NewTaskSet()
+	linkTask := func(t *state.Task) {
+		tasks := ts.Tasks()
+		if len(tasks) > 0 {
+			t.WaitFor(tasks[len(tasks)-1])
+		}
+		ts.AddTask(t)
+	}
+
+	// check for load-view and query-view hooks on custodians
+	for _, hookPrefix := range []string{"load-view-", "query-view-"} {
+		for _, name := range custodians {
+			plug := custodianPlugs[name]
+			custodian := plug.Snap
+			if _, ok := custodian.Hooks[hookPrefix+plug.Name]; !ok {
+				continue
+			}
+
+			const ignoreError = false
+			task := setupConfdbHook(st, name, hookPrefix+plug.Name, ignoreError)
+			linkTask(task)
+		}
+	}
+
+	if len(ts.Tasks()) == 0 {
+		// no hooks to run, no need to schedule tasks
+		return nil, nil
+	}
+
+	// clear the ongoing tx from the state and unblock other writers waiting for it
+	clearTxTask := st.NewTask("clear-confdb-tx", "Clears the ongoing confdb transaction from state")
+	clearTxTask.Set("confdb-transaction", tx)
+
+	// link all previous tasks to the task that carries the transaction
+	for _, t := range ts.Tasks() {
+		t.Set("tx-task", clearTxTask.ID())
+	}
+
+	linkTask(clearTxTask)
+	ts.MarkEdge(clearTxTask, clearTxEdge)
+
+	return ts, nil
 }

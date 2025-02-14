@@ -180,9 +180,18 @@ func (t *Transaction) Commit(st *state.State, schema confdb.Schema) error {
 		return err
 	}
 
-	// copy the databag before writing to make sure the writer can't modify into
-	// and introduce changes in the transaction
-	if err := writeDatabag(st, pristine.Copy(), t.ConfdbAccount, t.ConfdbName); err != nil {
+	pruned, err := schema.PruneEphemeral(data)
+	if err != nil {
+		return err
+	}
+
+	prunedBag, err := confdb.FromRawData(pruned)
+	if err != nil {
+		return err
+	}
+
+	// TODO: rewrite this to take raw data so we don't unmarshal only to remarshal again
+	if err := writeDatabag(st, prunedBag, t.ConfdbAccount, t.ConfdbName); err != nil {
 		return err
 	}
 
