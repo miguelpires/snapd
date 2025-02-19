@@ -168,6 +168,9 @@ func (c *getCommand) Execute(args []string) error {
 	if c.Pristine && !c.View {
 		return fmt.Errorf("cannot use --pristine without --view")
 	}
+	if c.Pristine && !confdbstate.IsConfdbHook(context) {
+		return errors.New("cannot use --pristine in non-confdb hook")
+	}
 
 	if strings.Contains(c.Positional.PlugOrSlotSpec, ":") {
 		parts := strings.SplitN(c.Positional.PlugOrSlotSpec, ":", 2)
@@ -402,7 +405,7 @@ func (c *getCommand) getConfdbValues(ctx *hookstate.Context, plugName string, re
 }
 
 func (c *getCommand) getDatabag(ctx *hookstate.Context, view *confdb.View, pristine bool) (bag confdb.DataBag, err error) {
-	_, readTxFunc, err := confdbstate.GetTransactionToRead(ctx, view)
+	_, readTxFunc, err := confdbstate.LoadConfdbFromSnapctl(ctx, view)
 	if err != nil {
 		return nil, err
 	}
@@ -414,9 +417,6 @@ func (c *getCommand) getDatabag(ctx *hookstate.Context, view *confdb.View, prist
 	}
 
 	if pristine {
-		if !confdbstate.IsConfdbHook(ctx) {
-			return nil, errors.New("cannot use --pristine in non-confdb hook")
-		}
 		return tx.Pristine(), nil
 	}
 	return tx, nil

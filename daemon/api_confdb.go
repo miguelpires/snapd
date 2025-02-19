@@ -66,7 +66,7 @@ func getView(c *Command, r *http.Request, _ *auth.UserState) Response {
 		return toAPIError(err)
 	}
 
-	chgID, err := confdbstate.CreateLoadConfdbChange(st, view, fields)
+	chgID, err := confdbstate.LoadConfdbAsync(st, view, fields)
 	if err != nil {
 		return toAPIError(err)
 	}
@@ -98,7 +98,7 @@ func setView(c *Command, r *http.Request, _ *auth.UserState) Response {
 		return toAPIError(err)
 	}
 
-	tx, commitTxFunc, err := confdbstateGetTransactionToModify(nil, st, view)
+	tx, commitTxFunc, err := confdbstateModifyConfdb(nil, st, view)
 	if err != nil {
 		return toAPIError(err)
 	}

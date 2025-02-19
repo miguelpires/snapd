@@ -40,6 +40,7 @@ var assertstateConfdb = assertstate.Confdb
 
 // Set finds the view identified by the account, confdb and view names and
 // sets the request fields to their respective values.
+// TODO: no longer used, change tests and remove
 func Set(st *state.State, account, confdbName, viewName string, requests map[string]interface{}) error {
 	view, err := GetView(st, account, confdbName, viewName)
 	if err != nil {
@@ -101,6 +102,7 @@ func GetView(st *state.State, account, confdbName, viewName string) (*confdb.Vie
 // uses it to get the values for the specified fields. The results are returned
 // in a map of fields to their values, unless there are no fields in which case
 // case all views are returned.
+// TODO: no longer used (API moved to async), change tests and remove
 func Get(st *state.State, account, confdbName, viewName string, fields []string) (interface{}, error) {
 	view, err := GetView(st, account, confdbName, viewName)
 	if err != nil {
@@ -195,13 +197,14 @@ var writeDatabag = func(st *state.State, databag confdb.JSONDataBag, account, co
 
 type CommitTxFunc func() (changeID string, waitChan <-chan struct{}, err error)
 
-// GetTransactionToModify retrieves or creates a transaction to change the view's
-// confdb. The state must be locked by the caller. Takes a hookstate.Context
-// if invoked in a hook. If a new transaction was created, also returns a
-// CommitTxFunc to be called to start committing (which in turn returns a change
-// ID and a wait channel that will be closed on the commit is done). If a transaction
-// already existed, changes to it will be saved on ctx.Done().
-func GetTransactionToModify(ctx *hookstate.Context, st *state.State, view *confdb.View) (*Transaction, CommitTxFunc, error) {
+// ModifyConfdb gets a transaction to change the confdb through the specified
+// view. The state must be locked by the caller. This returns a transaction
+// through which the confdb can be modified and a CommitTxFunc. The latter can
+// be called once the modifications are made to commit them. It will return a
+// changeID and a blocking channel (allowing the caller to either block or wait
+// asynchronously). If a transaction was already ongoing, CommitTxFunc simply
+// returns that without blocking (any changes to it will be saved on ctx.Done()).
+func ModifyConfdb(ctx *hookstate.Context, st *state.State, view *confdb.View) (*Transaction, CommitTxFunc, error) {
 	account, confdbName := view.Confdb().Account, view.Confdb().Name
 
 	// check if we're already running in the context of a committing transaction
@@ -528,9 +531,10 @@ func IsWriteConfdbHook(ctx *hookstate.Context) bool {
 			strings.HasPrefix(ctx.HookName(), "query-view-"))
 }
 
-type ReadTxFunc func() (*Transaction, error)
-
-func CreateLoadConfdbChange(st *state.State, view *confdb.View, requests []string) (string, error) {
+// LoadConfdbAsync schedules a change to load a confdb, running any appropriate
+// hooks and fulfilling the requests by reading the view and placing the resulting
+// data in the change's data (so it can be read by the client).
+func LoadConfdbAsync(st *state.State, view *confdb.View, requests []string) (changeID string, err error) {
 	account, confdbName := view.Confdb().Account, view.Confdb().Name
 
 	tx, err := NewTransaction(st, account, confdbName)
@@ -538,7 +542,7 @@ func CreateLoadConfdbChange(st *state.State, view *confdb.View, requests []strin
 		return "", fmt.Errorf("cannot access confdb view %s/%s/%s: cannot create transaction: %v", account, confdbName, view.Name, err)
 	}
 
-	ts, err := createAccessConfdbTasks(st, tx, view)
+	ts, err := createLoadConfdbTasks(st, tx, view)
 	if err != nil {
 		return "", err
 	}
@@ -576,7 +580,15 @@ func CreateLoadConfdbChange(st *state.State, view *confdb.View, requests []strin
 	return chg.ID(), nil
 }
 
-func GetTransactionToRead(ctx *hookstate.Context, view *confdb.View) (string, ReadTxFunc, error) {
+type ReadTxFunc func() (*Transaction, error)
+
+// LoadConfdbFromSnapctl gets a transaction to read the view's confdb. It's
+// meant to be called by snapctl and so the state must already be locked.
+// It returns a changeID for the change reading the confdb into a transaction
+// and a ReadTxFunc that blocks until the transaction has been loaded. If a
+// was already loaded into the current task (i.e., the context belongs to a
+// confdb-related hook), that ReadTxFunc returns the transaction without blocking.
+func LoadConfdbFromSnapctl(ctx *hookstate.Context, view *confdb.View) (changeID string, readTxFunc ReadTxFunc, err error) {
 	st := ctx.State()
 	account, confdbName := view.Confdb().Account, view.Confdb().Name
 	if IsConfdbHook(ctx) {
@@ -585,16 +597,16 @@ func GetTransactionToRead(ctx *hookstate.Context, view *confdb.View) (string, Re
 		t, _ := ctx.Task()
 		tx, _, err := GetStoredTransaction(t)
 		if err != nil {
-			return "", nil, fmt.Errorf("cannot access confdb view %s/%s/%s: cannot get transaction: %v", account, confdbName, view.Name, err)
+			return "", nil, fmt.Errorf("cannot load confdb view %s/%s/%s: cannot get transaction: %v", account, confdbName, view.Name, err)
 		}
 
 		if tx.ConfdbAccount != account || tx.ConfdbName != confdbName {
 			// TODO: this should be enabled at some point
-			return "", nil, fmt.Errorf("cannot access confdb %s/%s: ongoing transaction for %s/%s", account, confdbName, tx.ConfdbAccount, tx.ConfdbName)
+			return "", nil, fmt.Errorf("cannot load confdb %s/%s: ongoing transaction for %s/%s", account, confdbName, tx.ConfdbAccount, tx.ConfdbName)
 		}
 
 		// we're reading the tx that this hook is modifying
-		readTxFunc := func() (*Transaction, error) { return tx, nil }
+		readTxFunc = func() (*Transaction, error) { return tx, nil }
 		return "", readTxFunc, nil
 	}
 
@@ -602,17 +614,17 @@ func GetTransactionToRead(ctx *hookstate.Context, view *confdb.View) (string, Re
 	// and a change to load/modify data
 	tx, err := NewTransaction(st, account, confdbName)
 	if err != nil {
-		return "", nil, fmt.Errorf("cannot access confdb view %s/%s/%s: cannot create transaction: %v", account, confdbName, view.Name, err)
+		return "", nil, fmt.Errorf("cannot load confdb view %s/%s/%s: cannot create transaction: %v", account, confdbName, view.Name, err)
 	}
 
-	ts, err := createAccessConfdbTasks(st, tx, view)
+	ts, err := createLoadConfdbTasks(st, tx, view)
 	if err != nil {
 		return "", nil, err
 	}
 
 	if ts == nil {
-		// no hooks and tasks to run
-		readTxFunc := func() (*Transaction, error) { return tx, nil }
+		// no hooks or tasks to run, transaction can read databag directly
+		readTxFunc = func() (*Transaction, error) { return tx, nil }
 		return "", readTxFunc, nil
 	}
 
@@ -641,7 +653,7 @@ func GetTransactionToRead(ctx *hookstate.Context, view *confdb.View) (string, Re
 		return false
 	})
 
-	startRead := func() (*Transaction, error) {
+	readTxFunc = func() (*Transaction, error) {
 		err = setOngoingTransaction(st, account, confdbName)
 		if err != nil {
 			return nil, err
@@ -654,7 +666,7 @@ func GetTransactionToRead(ctx *hookstate.Context, view *confdb.View) (string, Re
 		case <-waitChan:
 		case <-time.After(TransactionTimeout):
 			ctx.Lock()
-			return nil, fmt.Errorf("cannot access confdb %s/%s in change %s: timed out after %s", account, confdbName, chg.ID(), TransactionTimeout)
+			return nil, fmt.Errorf("cannot load confdb %s/%s in change %s: timed out after %s", account, confdbName, chg.ID(), TransactionTimeout)
 		}
 
 		ctx.Lock()
@@ -664,17 +676,17 @@ func GetTransactionToRead(ctx *hookstate.Context, view *confdb.View) (string, Re
 		return tx, nil
 	}
 
-	return chg.ID(), startRead, nil
+	return chg.ID(), readTxFunc, nil
 }
 
-func createAccessConfdbTasks(st *state.State, tx *Transaction, view *confdb.View) (*state.TaskSet, error) {
+func createLoadConfdbTasks(st *state.State, tx *Transaction, view *confdb.View) (*state.TaskSet, error) {
 	custodians, custodianPlugs, err := getCustodianPlugsForView(st, view)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(custodians) == 0 {
-		return nil, fmt.Errorf("cannot access confdb %s/%s: no custodian snap installed", view.Confdb().Account, view.Confdb().Name)
+		return nil, fmt.Errorf("cannot load confdb %s/%s: no custodian snap installed", view.Confdb().Account, view.Confdb().Name)
 	}
 
 	ts := state.NewTaskSet()

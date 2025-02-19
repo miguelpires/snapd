@@ -853,7 +853,7 @@ func (s *confdbTestSuite) TestGetTransactionFromUserCreatesNewChange(c *C) {
 
 	view := s.confdb.View("setup-wifi")
 
-	tx, commitTxFunc, err := confdbstate.GetTransactionToModify(nil, s.state, view)
+	tx, commitTxFunc, err := confdbstate.ModifyConfdb(nil, s.state, view)
 	c.Assert(err, IsNil)
 	c.Assert(tx, NotNil)
 	c.Assert(commitTxFunc, NotNil)
@@ -1139,7 +1139,7 @@ func (s *confdbTestSuite) TestGetDifferentTransactionThanOngoing(c *C) {
 	c.Assert(err, IsNil)
 
 	ctx.Lock()
-	tx, commitTxFunc, err := confdbstate.GetTransactionToModify(ctx, s.state, confdb.View("foo"))
+	tx, commitTxFunc, err := confdbstate.ModifyConfdb(ctx, s.state, confdb.View("foo"))
 	ctx.Unlock()
 	c.Assert(err, ErrorMatches, fmt.Sprintf(`cannot access confdb foo/bar: ongoing transaction for %s/network`, s.devAccID))
 	c.Assert(tx, IsNil)
