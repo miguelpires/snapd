@@ -21,6 +21,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -59,7 +60,7 @@ view paths.
 `)
 
 type cmdGet struct {
-	clientMixin
+	waitMixin
 	Positional struct {
 		Snap installedSnapName `required:"yes"`
 		Keys []string
@@ -76,14 +77,14 @@ func init() {
 	}
 
 	addCommand("get", shortGetHelp, longGetHelp, func() flags.Commander { return &cmdGet{} },
-		map[string]string{
+		waitDescs.also(map[string]string{
 			// TRANSLATORS: This should not start with a lowercase letter.
 			"d": i18n.G("Always return document, even with single key"),
 			// TRANSLATORS: This should not start with a lowercase letter.
 			"l": i18n.G("Always return list, even with single key"),
 			// TRANSLATORS: This should not start with a lowercase letter.
 			"t": i18n.G("Strict typing with nulls and quoted strings"),
-		}, []argDesc{
+		}), []argDesc{
 			{
 				name: "<snap>",
 				// TRANSLATORS: This should not start with a lowercase letter.
@@ -257,17 +258,11 @@ func (x *cmdGet) Execute(args []string) error {
 	var conf map[string]interface{}
 	var err error
 	if isConfdbViewID(snapName) {
-		if err := validateConfdbFeatureFlag(); err != nil {
-			return err
-		}
-
 		// first argument is a confdbViewID, use the confdb API
-		confdbViewID := snapName
-		if err := validateConfdbViewID(confdbViewID); err != nil {
-			return err
+		if x.NoWait {
+			return errors.New("cannot use --no-wait when reading a confdb")
 		}
-
-		conf, err = x.client.ConfdbGetViaView(confdbViewID, confKeys)
+		conf, err = x.getConfdb(snapName, confKeys)
 	} else {
 		conf, err = x.client.Conf(snapName, confKeys)
 	}
@@ -284,6 +279,36 @@ func (x *cmdGet) Execute(args []string) error {
 	default:
 		return x.outputDefault(conf, snapName, confKeys)
 	}
+}
+
+func (x *cmdGet) getConfdb(confdbViewID string, confKeys []string) (map[string]interface{}, error) {
+	if err := validateConfdbFeatureFlag(); err != nil {
+		return nil, err
+	}
+
+	if err := validateConfdbViewID(confdbViewID); err != nil {
+		return nil, err
+	}
+
+	chgID, err := x.client.ConfdbGetViaView(confdbViewID, confKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	chg, err := x.wait(chgID)
+	if err != nil {
+		// no noWait check, doesn't make sense with confdb read
+		return nil, err
+	}
+
+	var conf map[string]interface{}
+	err = chg.Get("confdb-data", &conf)
+	if err != nil {
+		// TODO: special case on no data?
+		return nil, err
+	}
+
+	return conf, nil
 }
 
 func validateConfdbFeatureFlag() error {

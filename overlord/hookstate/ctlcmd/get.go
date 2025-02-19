@@ -402,13 +402,12 @@ func (c *getCommand) getConfdbValues(ctx *hookstate.Context, plugName string, re
 }
 
 func (c *getCommand) getDatabag(ctx *hookstate.Context, view *confdb.View, pristine bool) (bag confdb.DataBag, err error) {
-	//account, confdbName := view.Confdb().Account, view.Confdb().Name
-
-	_, readTxFunc, err := confdbstate.GetTransactionToRead(ctx, ctx.State(), view)
+	_, readTxFunc, err := confdbstate.GetTransactionToRead(ctx, view)
 	if err != nil {
 		return nil, err
 	}
 
+	// wait for tasks reading confdb (may block)
 	tx, err := readTxFunc()
 	if err != nil {
 		return nil, err

@@ -392,7 +392,7 @@ func MockConfdbstateGet(f func(_ *state.State, _, _, _ string, _ []string) (inte
 }
 
 func MockConfdbstateGetTransaction(f func(*hookstate.Context, *state.State, *confdb.View) (*confdbstate.Transaction, confdbstate.CommitTxFunc, error)) (restore func()) {
-	return testutil.Mock(&confdbstateGetTransaction, f)
+	return testutil.Mock(&confdbstateGetTransactionToModify, f)
 }
 
 func MockRebootNoticeWait(d time.Duration) (restore func()) {

@@ -54,6 +54,7 @@ func Manager(st *state.State, hookMgr *hookstate.HookManager, runner *state.Task
 	// unblock others who may be waiting for it
 	runner.AddHandler("clear-confdb-tx-on-error", m.noop, m.clearOngoingTransaction)
 	runner.AddHandler("clear-confdb-tx", m.clearOngoingTransaction, nil)
+	runner.AddHandler("read-confdb", m.doReadConfdbIntoChange, nil)
 
 	hookMgr.Register(regexp.MustCompile("^change-view-.+$"), func(context *hookstate.Context) hookstate.Handler {
 		return &changeViewHandler{ctx: context}
@@ -111,6 +112,53 @@ func (m *ConfdbManager) clearOngoingTransaction(t *state.Task, _ *tomb.Tomb) err
 	}
 
 	// TODO: unblock next waiting confdb writer once we add the blocking logic
+	return nil
+}
+
+func (m *ConfdbManager) doReadConfdbIntoChange(t *state.Task, _ *tomb.Tomb) error {
+	st := t.State()
+	st.Lock()
+	defer st.Unlock()
+
+	tx, _, err := GetStoredTransaction(t)
+	if err != nil {
+		return err
+	}
+
+	var viewName string
+	err = t.Get("view-name", &viewName)
+	if err != nil {
+		return fmt.Errorf(`internal error: cannot get "view-name" from task: %w`, err)
+	}
+
+	var requests []string
+	err = t.Get("requests", &requests)
+	if err != nil {
+		return fmt.Errorf(`internal error: cannot get "requests" from task: %w`, err)
+	}
+
+	var apiData map[string]interface{}
+	err = t.Change().Get("api-data", &apiData)
+	if err != nil && !errors.Is(err, state.ErrNoState) {
+		return err
+	}
+
+	if len(apiData) == 0 {
+		apiData = make(map[string]interface{})
+	}
+
+	view, err := GetView(st, tx.ConfdbAccount, tx.ConfdbName, viewName)
+	if err != nil {
+		return fmt.Errorf("internal error: cannot get view: %w", err)
+	}
+
+	result, err := GetViaView(tx, view, requests)
+	if err != nil {
+		return fmt.Errorf("cannot read confdb %s/%s: %w", tx.ConfdbAccount, tx.ConfdbName, err)
+	}
+
+	apiData["confdb-data"] = result
+	t.Change().Set("api-data", apiData)
 	return nil
 }
 

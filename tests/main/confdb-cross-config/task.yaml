@@ -34,6 +34,7 @@ execute: |
     rm -f /var/snap/test-custodian-snap/common/*
     rm -f /var/snap/test-failing-custodian-snap/common/*
     rm -f /var/snap/test-snap/common/*
+    rm -f /var/snap/loading-custodian/common/*
   }
 
   if [ "$TRUST_TEST_KEYS" = "false" ]; then
@@ -128,6 +129,18 @@ execute: |
   # try to read the ephemeral data
   OLD_CHANGE=$(snap changes | tail -n 2 | head -n 1 | awk '{print $1}')
   loading-custodian.sh -c 'snapctl get --view :manage-wifi password' | MATCH "my-secret-query"
+  changeAfterID "$OLD_CHANGE"
+  retry -n 5 --wait 1 sh -c 'snap changes | tail -n 2 | grep "Done.*Load confdb \"developer1/network-ephemeral\""'
+
+  # there was no data saved under "password" in the databags
+  MATCH 'error: error running snapctl: cannot get "password" through developer1/network-ephemeral/wifi-setup: no view data' < /var/snap/loading-custodian/common/load-view-manage-wifi-ran
+  # check that query-view sees the value as loaded by load-view (before appending "-query" it)
+  MATCH "my-secret" < /var/snap/loading-custodian/common/query-view-manage-wifi-ran
+
+  # check that triggering the change from the API has the same effect
+  resetTestState
+  OLD_CHANGE=$(snap changes | tail -n 2 | head -n 1 | awk '{print $1}')
+  snap get developer1/network-ephemeral/wifi-setup password | MATCH "my-secret-query"
   changeAfterID "$OLD_CHANGE"
   retry -n 5 --wait 1 sh -c 'snap changes | tail -n 2 | grep "Done.*Load confdb \"developer1/network-ephemeral\""'
 

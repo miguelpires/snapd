@@ -287,7 +287,8 @@ var ensureNow = func(st *state.State) {
 }
 
 const (
-	clearTxEdge = state.TaskSetEdge("clear-tx-edge")
+	clearTxEdge        = state.TaskSetEdge("clear-tx-edge")
+	TransactionTimeout = 2 * time.Minute
 )
 
 func createChangeConfdbTasks(st *state.State, tx *Transaction, view *confdb.View, callingSnap string) (*state.TaskSet, error) {
@@ -529,9 +530,55 @@ func IsWriteConfdbHook(ctx *hookstate.Context) bool {
 
 type ReadTxFunc func() (*Transaction, error)
 
-func GetTransactionToRead(ctx *hookstate.Context, st *state.State, view *confdb.View) (string, ReadTxFunc, error) {
+func CreateLoadConfdbChange(st *state.State, view *confdb.View, requests []string) (string, error) {
 	account, confdbName := view.Confdb().Account, view.Confdb().Name
 
+	tx, err := NewTransaction(st, account, confdbName)
+	if err != nil {
+		return "", fmt.Errorf("cannot access confdb view %s/%s/%s: cannot create transaction: %v", account, confdbName, view.Name, err)
+	}
+
+	ts, err := createAccessConfdbTasks(st, tx, view)
+	if err != nil {
+		return "", err
+	}
+
+	// schedule a task to read the tx after the hook and add the data to the
+	// change so it can be read by the client
+	readConfdbTask := st.NewTask("read-confdb", "Read the confdb data and write into the change")
+	readConfdbTask.Set("requests", requests)
+	readConfdbTask.Set("view-name", view.Name)
+
+	chg := st.NewChange("load-confdb", fmt.Sprintf(`Load confdb "%s/%s"`, account, confdbName))
+	if ts != nil {
+		// if there are hooks to run, link the read-confdb task to those tasks
+		clearTxTask, err := ts.Edge(clearTxEdge)
+		if err != nil {
+			// TODO better msg
+			return "", err
+		}
+
+		readConfdbTask.Set("tx-task", clearTxTask.ID())
+		readConfdbTask.WaitFor(clearTxTask)
+		chg.AddAll(ts)
+
+		err = setOngoingTransaction(st, account, confdbName)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		// we're only running the read-confdb task, put the transaction there directly.
+		readConfdbTask.Set("confdb-transaction", tx)
+	}
+
+	chg.AddTask(readConfdbTask)
+
+	return chg.ID(), nil
+}
+
+func GetTransactionToRead(ctx *hookstate.Context, view *confdb.View) (string, ReadTxFunc, error) {
+	st := ctx.State()
+	account, confdbName := view.Confdb().Account, view.Confdb().Name
 	if IsConfdbHook(ctx) {
 		// running in the context of a transaction, so if the referenced confdb
 		// doesn't match that tx, we only allow the caller to read the other confdb
@@ -550,7 +597,6 @@ func GetTransactionToRead(ctx *hookstate.Context, st *state.State, view *confdb.
 		readTxFunc := func() (*Transaction, error) { return tx, nil }
 		return "", readTxFunc, nil
 	}
-	// TODO: add concurrency checks
 
 	// not running in an existing confdb hook context, so create a transaction
 	// and a change to load/modify data
@@ -559,8 +605,19 @@ func GetTransactionToRead(ctx *hookstate.Context, st *state.State, view *confdb.
 		return "", nil, fmt.Errorf("cannot access confdb view %s/%s/%s: cannot create transaction: %v", account, confdbName, view.Name, err)
 	}
 
+	ts, err := createAccessConfdbTasks(st, tx, view)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if ts == nil {
+		// no hooks and tasks to run
+		readTxFunc := func() (*Transaction, error) { return tx, nil }
+		return "", readTxFunc, nil
+	}
+
 	var chg *state.Change
-	if ctx == nil || ctx.IsEphemeral() {
+	if ctx.IsEphemeral() {
 		chg = st.NewChange("load-confdb", fmt.Sprintf("Load confdb \"%s/%s\"", account, confdbName))
 	} else {
 		// we're running in the context of a non-confdb hook, add the tasks to that change
@@ -568,22 +625,7 @@ func GetTransactionToRead(ctx *hookstate.Context, st *state.State, view *confdb.
 		chg = task.Change()
 	}
 
-	ts, err := createAccessConfdbTasks(st, tx, view)
-	if err != nil {
-		return "", nil, err
-	}
-
-	if ts == nil {
-		// no hooks to run, just read directly from the databag
-		readTxFunc := func() (*Transaction, error) { return tx, nil }
-		return "", readTxFunc, nil
-	}
 	chg.AddAll(ts)
-
-	err = setOngoingTransaction(st, account, confdbName)
-	if err != nil {
-		return "", nil, err
-	}
 
 	clearTxTask, err := ts.Edge(clearTxEdge)
 	if err != nil {
@@ -600,14 +642,19 @@ func GetTransactionToRead(ctx *hookstate.Context, st *state.State, view *confdb.
 	})
 
 	startRead := func() (*Transaction, error) {
+		err = setOngoingTransaction(st, account, confdbName)
+		if err != nil {
+			return nil, err
+		}
+
 		ensureNow(st)
 		ctx.Unlock()
 
 		select {
 		case <-waitChan:
-		case <-time.After(time.Minute):
+		case <-time.After(TransactionTimeout):
 			ctx.Lock()
-			return nil, fmt.Errorf("could not read confdb %s/%s after 1 minute", account, confdbName)
+			return nil, fmt.Errorf("cannot access confdb %s/%s in change %s: timed out after %s", account, confdbName, chg.ID(), TransactionTimeout)
 		}
 
 		ctx.Lock()
@@ -655,7 +702,8 @@ func createAccessConfdbTasks(st *state.State, tx *Transaction, view *confdb.View
 	}
 
 	if len(ts.Tasks()) == 0 {
-		// no hooks to run, no need to schedule tasks
+		// no hooks to run and not running from API (don't need task to populate)
+		// data in change so we can just read the databag synchronously
 		return nil, nil
 	}
 

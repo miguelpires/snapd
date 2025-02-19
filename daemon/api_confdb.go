@@ -27,6 +27,7 @@ import (
 	"github.com/snapcore/snapd/confdb"
 	"github.com/snapcore/snapd/features"
 	"github.com/snapcore/snapd/overlord/auth"
+	"github.com/snapcore/snapd/overlord/confdbstate"
 	"github.com/snapcore/snapd/overlord/configstate/config"
 	"github.com/snapcore/snapd/overlord/state"
 	"github.com/snapcore/snapd/strutil"
@@ -52,7 +53,7 @@ func getView(c *Command, r *http.Request, _ *auth.UserState) Response {
 	}
 
 	vars := muxVars(r)
-	account, confdbName, view := vars["account"], vars["confdb"], vars["view"]
+	account, confdbName, viewName := vars["account"], vars["confdb"], vars["view"]
 	fieldStr := r.URL.Query().Get("fields")
 
 	var fields []string
@@ -60,12 +61,18 @@ func getView(c *Command, r *http.Request, _ *auth.UserState) Response {
 		fields = strutil.CommaSeparatedList(fieldStr)
 	}
 
-	results, err := confdbstateGet(st, account, confdbName, view, fields)
+	view, err := confdbstateGetView(st, account, confdbName, viewName)
 	if err != nil {
 		return toAPIError(err)
 	}
 
-	return SyncResponse(results)
+	chgID, err := confdbstate.CreateLoadConfdbChange(st, view, fields)
+	if err != nil {
+		return toAPIError(err)
+	}
+
+	ensureStateSoon(st)
+	return AsyncResponse(nil, chgID)
 }
 
 func setView(c *Command, r *http.Request, _ *auth.UserState) Response {
@@ -91,7 +98,7 @@ func setView(c *Command, r *http.Request, _ *auth.UserState) Response {
 		return toAPIError(err)
 	}
 
-	tx, commitTxFunc, err := confdbstateGetTransaction(nil, st, view)
+	tx, commitTxFunc, err := confdbstateGetTransactionToModify(nil, st, view)
 	if err != nil {
 		return toAPIError(err)
 	}

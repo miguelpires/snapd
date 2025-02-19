@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/snapcore/snapd/client/clientutil"
 	"github.com/snapcore/snapd/i18n"
@@ -262,15 +263,20 @@ func setConfdbValues(ctx *hookstate.Context, plugName string, requests map[strin
 
 	// if a new transaction was created, commit it
 	if commitTxFunc != nil {
-		_, waitChan, err := commitTxFunc()
+		chgID, waitChan, err := commitTxFunc()
 		if err != nil {
 			return err
 		}
 
 		// wait for the transaction to be committed
 		ctx.Unlock()
-		<-waitChan
-		ctx.Lock()
+		defer ctx.Lock()
+
+		select {
+		case <-waitChan:
+		case <-time.After(confdbstate.TransactionTimeout):
+			return fmt.Errorf("cannot modify confdb %s/%s in change %s: timed out after %s", account, confdbName, chgID, confdbstate.TransactionTimeout)
+		}
 	}
 
 	return nil
