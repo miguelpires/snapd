@@ -264,7 +264,7 @@ func ModifyConfdb(ctx *hookstate.Context, st *state.State, view *confdb.View) (*
 			return "", nil, err
 		}
 
-		err = setOngoingTransaction(st, account, confdbName)
+		err = setWriteTransaction(st, account, confdbName, clearTxTask.ID())
 		if err != nil {
 			return "", nil, err
 		}
@@ -566,7 +566,7 @@ func LoadConfdbAsync(st *state.State, view *confdb.View, requests []string) (cha
 		readConfdbTask.WaitFor(clearTxTask)
 		chg.AddAll(ts)
 
-		err = setOngoingTransaction(st, account, confdbName)
+		err = addReadTransaction(st, account, confdbName, clearTxTask.ID())
 		if err != nil {
 			return "", err
 		}
@@ -654,7 +654,7 @@ func LoadConfdbFromSnapctl(ctx *hookstate.Context, view *confdb.View) (changeID 
 	})
 
 	readTxFunc = func() (*Transaction, error) {
-		err = setOngoingTransaction(st, account, confdbName)
+		err = addReadTransaction(st, account, confdbName, clearTxTask.ID())
 		if err != nil {
 			return nil, err
 		}
