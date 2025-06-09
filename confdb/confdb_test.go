@@ -1951,6 +1951,42 @@ func (s *viewSuite) TestUnsetUnmatchedPlaceholderMid(c *C) {
 	})
 }
 
+func (s *viewSuite) TestRepeatPlaceholders(c *C) {
+	type testcase struct {
+		request string
+		storage string
+		err     string
+	}
+
+	tcs := []testcase{
+		{
+			request: "{bar}.a.{bar}",
+			storage: "foo.{bar}",
+			err:     `request cannot have more than one placeholder with the same name "bar": {bar}.a.{bar}`,
+		},
+		{
+			request: "a.{bar}",
+			storage: "foo.{bar}.{bar}",
+		},
+	}
+
+	for _, tc := range tcs {
+		_, err := confdb.NewSchema("acc", "confdb", map[string]interface{}{
+			"foo": map[string]interface{}{
+				"rules": []interface{}{
+					map[string]interface{}{"request": tc.request, "storage": tc.storage},
+				},
+			},
+		}, confdb.NewJSONSchema())
+
+		if tc.err != "" {
+			c.Assert(err.Error(), Equals, fmt.Sprintf(`cannot define view "foo": %s`, tc.err))
+		} else {
+			c.Assert(err, IsNil)
+		}
+	}
+}
+
 func (s *viewSuite) TestGetValuesThroughPaths(c *C) {
 	type testcase struct {
 		path     string
