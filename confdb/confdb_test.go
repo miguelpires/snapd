@@ -549,7 +549,27 @@ func (s *viewSuite) TestViewRequestAndStorageValidation(c *C) {
 		},
 		{
 			testName: "placeholder mismatch (same number)",
-			request:  "bad.{foo}", storage: "bad.{bar}", err: `placeholder "{foo}" from request "bad.{foo}" is absent from storage "bad.{bar}"`,
+			request:  "bad.{foo}", storage: "bad.{bar}", err: `placeholder "foo" from request "bad.{foo}" is absent from storage "bad.{bar}"`,
+		},
+		{
+			testName: "index placeholder mismatch",
+			request:  "bad[{foo}]", storage: "bad[{bar}]", err: `placeholder "foo" from request "bad[{foo}]" is absent from storage "bad[{bar}]"`,
+		},
+		{
+			testName: "index placeholder mismatch despite key placeholder with same name",
+			request:  "bad[{foo}]", storage: "bad.{foo}", err: `request "bad[{foo}]" and storage "bad.{foo}" have mismatched placeholders`,
+		},
+		{
+			testName: "repeated placeholder in request",
+			request:  "{bar}.a.{bar}",
+			storage:  "foo.{bar}",
+			err:      `request cannot have more than one placeholder with the same name "bar": {bar}.a.{bar}`,
+		},
+		{
+			testName: "repeated placeholder but in field and index",
+			request:  "{bar}[{bar}]",
+			storage:  "{bar}[{bar}]",
+			err:      `cannot use same name "bar" for key and index placeholder: {bar}[{bar}]`,
 		},
 		{
 			testName: "placeholder mismatch (different number)",
@@ -1779,6 +1799,34 @@ func (*viewSuite) TestSchemaMismatchCheckMultipleAlternativeTypesHappy(c *C) {
 	c.Assert(err, IsNil)
 }
 
+func (*viewSuite) TestMismatchSchemaArrayHappy(c *C) {
+	schemaStr := []byte(`{
+	"schema": {
+		"foo": {
+			"type": "array",
+			"values": {
+				"schema": {
+					"bar": "string",
+					"baz": "string"
+				}
+			}
+		}
+	}
+}`)
+	schema, err := confdb.ParseStorageSchema(schemaStr)
+	c.Assert(err, IsNil)
+
+	_, err = confdb.NewSchema("acc", "confdb", map[string]interface{}{
+		"foo": map[string]interface{}{
+			"rules": []interface{}{
+				map[string]interface{}{"request": "foo[1].bar", "storage": "foo[1].bar"},
+				map[string]interface{}{"request": "foo[{n}].baz", "storage": "foo[{n}].baz"},
+			},
+		},
+	}, schema)
+	c.Assert(err, IsNil)
+}
+
 func (s *viewSuite) TestSetUnmatchedPlaceholderLeaf(c *C) {
 	databag := confdb.NewJSONDatabag()
 	schema, err := confdb.NewSchema("acc", "confdb", map[string]interface{}{
@@ -1951,7 +1999,7 @@ func (s *viewSuite) TestUnsetUnmatchedPlaceholderMid(c *C) {
 	})
 }
 
-func (s *viewSuite) TestRepeatPlaceholders(c *C) {
+func (s *viewSuite) TestDuplicatedPlaceholders(c *C) {
 	type testcase struct {
 		request string
 		storage string
@@ -1967,6 +2015,11 @@ func (s *viewSuite) TestRepeatPlaceholders(c *C) {
 		{
 			request: "a.{bar}",
 			storage: "foo.{bar}.{bar}",
+		},
+		{
+			request: "a.{bar}[{bar}]",
+			storage: "foo[{bar}].{bar}",
+			err:     `cannot use same name "bar" for key and index placeholder: a.{bar}[{bar}]`,
 		},
 	}
 
@@ -1985,6 +2038,20 @@ func (s *viewSuite) TestRepeatPlaceholders(c *C) {
 			c.Assert(err, IsNil)
 		}
 	}
+}
+
+func (s *viewSuite) TestIndexPlaceholders(c *C) {
+	schema, err := confdb.NewSchema("acc", "confdb", map[string]interface{}{
+		"foo": map[string]interface{}{
+			"rules": []interface{}{
+				map[string]interface{}{"request": "a[{n}]", "storage": "b[{n}]"},
+				map[string]interface{}{"request": "a[{n}].c", "storage": "b[{n}].c"},
+				map[string]interface{}{"request": "a[{n}][{m}]", "storage": "b[{m}][{n}]"},
+			},
+		},
+	}, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	c.Assert(schema, NotNil)
 }
 
 func (s *viewSuite) TestGetValuesThroughPaths(c *C) {

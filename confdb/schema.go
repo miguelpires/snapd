@@ -1294,8 +1294,18 @@ func (v *arraySchema) SchemaAt(path []string) ([]DatabagSchema, error) {
 		return []DatabagSchema{v}, nil
 	}
 
+	// key can be a number or a placeholder wrapped in square brackets ([1] or [{n}])
+	// TODO: just replace with regex check
 	key := path[0]
-	_, err := strconv.ParseUint(key, 10, 0)
+	if len(key) < 3 || key[0] != '[' || key[len(key)-1] != ']' {
+		return nil, schemaAtErrorf(path, `key %q cannot be used to index array`, key)
+	}
+
+	if key[1] != '{' || key[len(key)-1] != ']' {
+		return nil, schemaAtErrorf(path, `key %q cannot be used to index array`, key)
+	}
+
+	_, err := strconv.ParseUint(key[1:len(key)-1], 10, 0)
 	if err != nil {
 		return nil, schemaAtErrorf(path, `key %q cannot be used to index array`, key)
 	}

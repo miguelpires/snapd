@@ -28,6 +28,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/snapcore/snapd/i18n"
@@ -165,8 +166,10 @@ var (
 	ValidConfdbName = validSubkey
 	ValidViewName   = validSubkey
 
-	validSubkey      = regexp.MustCompile(fmt.Sprintf("^%s$", subkeyRegex))
-	validPlaceholder = regexp.MustCompile(fmt.Sprintf("^{%s}$", subkeyRegex))
+	validSubkey           = regexp.MustCompile(fmt.Sprintf("^%s$", subkeyRegex))
+	validIndexSubkey      = regexp.MustCompile(`^\[[0-9]+\]$`)
+	validPlaceholder      = regexp.MustCompile(fmt.Sprintf("^{%s}$", subkeyRegex))
+	validIndexPlaceholder = regexp.MustCompile(fmt.Sprintf("^\\[{%s}\\]$", subkeyRegex))
 	// TODO: decide on what the format should be for aliases in schemas
 	validAliasName = validSubkey
 	subkeyRegex    = "[a-z](?:-?[a-z0-9])*"
@@ -399,23 +402,68 @@ func validateRequestStoragePair(request, storage string) error {
 		return fmt.Errorf("invalid storage %q: %w", storage, err)
 	}
 
-	reqPlaceholders, storagePlaceholders := getPlaceholders(request), getPlaceholders(storage)
+	// check that the request and storage key placeholders match
+	reqKeyVars, err := getKeyPlaceholders(request)
+	if err != nil {
+		return err
+	}
+
+	storageKeyVars, err := getKeyPlaceholders(storage)
+	if err != nil {
+		return err
+	}
+
+	err = checkForMatchingPlaceholders(request, storage, reqKeyVars, storageKeyVars)
+	if err != nil {
+		return err
+	}
+
+	// check that the request and storage list index placeholders match
+	reqIndexVars, err := getIndexPlaceholders(request)
+	if err != nil {
+		return err
+	}
+
+	storageIndexVars, err := getIndexPlaceholders(storage)
+	if err != nil {
+		return err
+	}
+
+	err = checkForMatchingPlaceholders(request, storage, reqIndexVars, storageIndexVars)
+	if err != nil {
+		return err
+	}
+
+	// check that there are no key and index placeholders with the same name.
+	// technically, this would work (there's no ambiguity because no value matches
+	// both a key and an index) but it could make view paths very confusing
+	for name := range reqKeyVars {
+		if _, ok := reqIndexVars[name]; ok {
+			return fmt.Errorf("cannot use same name %q for key and index placeholder: %s", name, request)
+		}
+	}
+
+	return nil
+}
+
+// check that placeholders used in a request path are accounted in the storage
+// path (and vice-versa) and that we don't use them to mean more than one thing
+func checkForMatchingPlaceholders(request, storage string, reqPlaceholders, storagePlaceholders map[string]int) error {
 	if len(reqPlaceholders) != len(storagePlaceholders) {
 		return fmt.Errorf("request %q and storage %q have mismatched placeholders", request, storage)
 	}
 
-	for placeholder, count := range reqPlaceholders {
+	for name, count := range reqPlaceholders {
 		if count != 1 {
 			return fmt.Errorf("request cannot have more than one placeholder with the same name %q: %s",
-				placeholder, request)
+				name, request)
 		}
 
-		if storagePlaceholders[placeholder] == 0 {
+		if storagePlaceholders[name] == 0 {
 			return fmt.Errorf("placeholder %q from request %q is absent from storage %q",
-				placeholder, request, storage)
+				name, request, storage)
 		}
 	}
-
 	return nil
 }
 
@@ -430,18 +478,19 @@ type validationOptions struct {
 //   - non-placeholder subkeys are made up of lowercase alphanumeric ASCII characters,
 //     optionally with dashes between alphanumeric characters (e.g., "a-b-c")
 //   - placeholder subkeys are composed of non-placeholder subkeys wrapped in curly brackets
-func validateViewDottedPath(path string, opts *validationOptions) (err error) {
+func validateViewDottedPath(path string, opts *validationOptions) error {
 	if opts == nil {
 		opts = &validationOptions{}
 	}
 
-	subkeys := strings.Split(path, ".")
+	subkeys, err := splitViewPath(path)
+	if err != nil {
+		return err
+	}
 	for _, subkey := range subkeys {
-		if subkey == "" {
-			return errors.New("cannot have empty subkeys")
-		}
-
-		if !validSubkey.MatchString(subkey) && (!opts.allowPlaceholder || !validPlaceholder.MatchString(subkey)) {
+		if !validSubkey.MatchString(subkey) && !validIndexSubkey.MatchString(subkey) &&
+			(!opts.allowPlaceholder ||
+				(!validPlaceholder.MatchString(subkey) && !validIndexPlaceholder.MatchString(subkey))) {
 			return fmt.Errorf("invalid subkey %q", subkey)
 		}
 	}
@@ -449,9 +498,51 @@ func validateViewDottedPath(path string, opts *validationOptions) (err error) {
 	return nil
 }
 
+func splitViewPath(path string) ([]string, error) {
+	var subkeys []string
+	sb := &strings.Builder{}
+
+	finishSubkey := func() error {
+		if sb.Len() == 0 {
+			return errors.New("cannot have empty subkeys")
+		}
+		subkeys = append(subkeys, sb.String())
+		sb.Reset()
+		return nil
+	}
+
+	for _, c := range path {
+		switch c {
+		case '.':
+			if err := finishSubkey(); err != nil {
+				return nil, err
+			}
+
+		case '[':
+			if err := finishSubkey(); err != nil {
+				return nil, err
+			}
+
+			// include the square brackets as they imply a different type of placeholder
+			fallthrough
+
+		default:
+			if _, err := sb.WriteRune(c); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if err := finishSubkey(); err != nil {
+		return nil, err
+	}
+
+	return subkeys, nil
+}
+
 // getPlaceholders returns the set of placeholders in the string or nil, if
 // there is none.
-func getPlaceholders(viewStr string) map[string]int {
+func getPlaceholders(path string, filter func(string) (string, bool)) (map[string]int, error) {
 	var placeholders map[string]int
 	count := func(key string) {
 		if placeholders == nil {
@@ -460,14 +551,36 @@ func getPlaceholders(viewStr string) map[string]int {
 		placeholders[key]++
 	}
 
-	subkeys := strings.Split(viewStr, ".")
+	subkeys, err := splitViewPath(path)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, subkey := range subkeys {
-		if isPlaceholder(subkey) {
-			count(subkey[1 : len(subkey)-1])
+		if placeholder, ok := filter(subkey); ok {
+			count(placeholder)
 		}
 	}
 
-	return placeholders
+	return placeholders, nil
+}
+
+func getKeyPlaceholders(path string) (map[string]int, error) {
+	return getPlaceholders(path, func(key string) (string, bool) {
+		if isPlaceholder(key) {
+			return key[1 : len(key)-1], true
+		}
+		return "", false
+	})
+}
+
+func getIndexPlaceholders(path string) (map[string]int, error) {
+	return getPlaceholders(path, func(key string) (string, bool) {
+		if isIndexPlaceholder(key) {
+			return key[2 : len(key)-2], true
+		}
+		return "", false
+	})
 }
 
 // View returns a view from the confdb schema.
@@ -653,7 +766,11 @@ func (v *View) Unset(databag Databag, request string) error {
 
 func (v *View) matchWriteRequest(request string) ([]requestMatch, error) {
 	var matches []requestMatch
-	subkeys := strings.Split(request, ".")
+	subkeys, err := splitViewPath(request)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, rule := range v.rules {
 		placeholders, suffixParts, ok := rule.match(subkeys)
 		if !ok {
@@ -686,13 +803,16 @@ func checkSchemaMismatch(schema DatabagSchema, rules []*viewRule) error {
 out:
 	for _, rule := range rules {
 		path := rule.originalStorage
-		pathParts := strings.Split(path, ".")
+		pathParts, err := splitViewPath(path)
+		if err != nil {
+			return err
+		}
+
 		schemas, err := schema.SchemaAt(pathParts)
 		if err != nil {
 			var serr *schemaAtError
 			if errors.As(err, &serr) {
-				parts := strings.Split(path, ".")
-				subParts := parts[:len(parts)-serr.left]
+				subParts := pathParts[:len(pathParts)-serr.left]
 				subPath := strings.Join(subParts, ".")
 
 				return fmt.Errorf(`storage path %q for request %q is invalid after %q: %w`,
@@ -828,6 +948,7 @@ func replaceIn(path, key, value string) string {
 		}
 	}
 
+	// TODO: what to do about this. will have to do this manually
 	return strings.Join(parts, ".")
 }
 
@@ -840,7 +961,10 @@ func checkForUnusedBranches(value interface{}, paths map[string]struct{}) error 
 		var err error
 		var pathParts []string
 		if path != "" {
-			pathParts = strings.Split(path, ".")
+			pathParts, err = splitViewPath(path)
+			if err != nil {
+				return err
+			}
 		}
 
 		copyValue, err = prunePathInValue(pathParts, copyValue)
@@ -1247,7 +1371,10 @@ func newViewRule(request, storage, accesstype string) (*viewRule, error) {
 	requestMatchers := make([]requestMatcher, 0, len(requestSubkeys))
 	for _, subkey := range requestSubkeys {
 		var patt requestMatcher
-		if isPlaceholder(subkey) {
+
+		if isIndexPlaceholder(subkey) {
+			patt = indexPlaceholder(subkey[2 : len(subkey)-2])
+		} else if isPlaceholder(subkey) {
 			patt = placeholder(subkey[1 : len(subkey)-1])
 		} else {
 			patt = literal(subkey)
@@ -1260,7 +1387,9 @@ func newViewRule(request, storage, accesstype string) (*viewRule, error) {
 	pathWriters := make([]storageWriter, 0, len(pathSubkeys))
 	for _, subkey := range pathSubkeys {
 		var patt storageWriter
-		if isPlaceholder(subkey) {
+		if isIndexPlaceholder(subkey) {
+			patt = indexPlaceholder(subkey[2 : len(subkey)-2])
+		} else if isPlaceholder(subkey) {
 			patt = placeholder(subkey[1 : len(subkey)-1])
 		} else {
 			patt = literal(subkey)
@@ -1280,6 +1409,10 @@ func newViewRule(request, storage, accesstype string) (*viewRule, error) {
 
 func isPlaceholder(part string) bool {
 	return part[0] == '{' && part[len(part)-1] == '}'
+}
+
+func isIndexPlaceholder(part string) bool {
+	return len(part) > 4 && part[0] == '[' && part[len(part)-1] == ']' && isPlaceholder(part[1:len(part)-1])
 }
 
 // viewRule represents an individual view rule. It can be used to match a
@@ -1322,17 +1455,13 @@ func (p *viewRule) match(reqSubkeys []string) (placeholders map[string]string, r
 func (p *viewRule) storagePath(placeholders map[string]string) (string, error) {
 	sb := &strings.Builder{}
 
+	opts := writeOpts{topLevel: true}
 	for _, subkey := range p.storage {
-		if sb.Len() > 0 {
-			if _, err := sb.WriteRune('.'); err != nil {
-				return "", err
-			}
-		}
-
-		if err := subkey.write(sb, placeholders); err != nil {
+		if err := subkey.write(sb, placeholders, opts); err != nil {
 			return "", err
 		}
 
+		opts.topLevel = false
 	}
 
 	return sb.String(), nil
@@ -1353,8 +1482,12 @@ type requestMatcher interface {
 	String() string
 }
 
+type writeOpts struct {
+	topLevel bool
+}
+
 type storageWriter interface {
-	write(sb *strings.Builder, placeholders map[string]string) error
+	write(sb *strings.Builder, placeholders map[string]string, opts writeOpts) error
 }
 
 // placeholder represents a subkey of a name/path (e.g., "{foo}") that can match
@@ -1370,11 +1503,18 @@ func (p placeholder) match(subkey string, placeholders map[string]string) bool {
 
 // write writes the value from the placeholders map corresponding to this placeholder
 // key into the strings.Builder.
-func (p placeholder) write(sb *strings.Builder, placeholders map[string]string) error {
+func (p placeholder) write(sb *strings.Builder, placeholders map[string]string, opts writeOpts) error {
 	subkey, ok := placeholders[string(p)]
 	if !ok {
 		// placeholder wasn't matched, return the original key in brackets
-		subkey = fmt.Sprintf("{%s}", string(p))
+		subkey = p.String()
+	}
+
+	if !opts.topLevel {
+		_, err := sb.WriteRune('.')
+		if err != nil {
+			return err
+		}
 	}
 
 	_, err := sb.WriteString(subkey)
@@ -1386,6 +1526,44 @@ func (p placeholder) String() string {
 	return "{" + string(p) + "}"
 }
 
+// indexPlaceholder represents a subkey of a name/path (e.g., "[{n}]") that can
+// match an index value and map it from the input name to the path.
+type indexPlaceholder string
+
+// match checks if the subkey can be used to index a list. If so, it adds a
+// mapping from this placeholder key to the supplied name subkey and returns true.
+func (p indexPlaceholder) match(subkey string, placeholders map[string]string) bool {
+	if _, err := strconv.Atoi(subkey); err != nil {
+		// subkey can't be used as a index placeholder value
+		return false
+	}
+
+	placeholders[string(p)] = subkey
+	return true
+}
+
+// write writes the value from the placeholders map corresponding to this placeholder
+// key into the strings.Builder.
+func (p indexPlaceholder) write(sb *strings.Builder, placeholders map[string]string, opts writeOpts) error {
+	subkey, ok := placeholders[string(p)]
+	if !ok {
+		// placeholder wasn't matched, return the original key in brackets
+		subkey = p.String()
+	}
+
+	if opts.topLevel {
+		return fmt.Errorf("cannot use index placeholder at top-level: schema top-level is always map")
+	}
+
+	_, err := sb.WriteString("[" + subkey + "]")
+	return err
+}
+
+// String returns the placeholder as a string.
+func (p indexPlaceholder) String() string {
+	return "[{" + string(p) + "}]"
+}
+
 // literal is a non-placeholder name/path subkey.
 type literal string
 
@@ -1395,7 +1573,14 @@ func (p literal) match(subkey string, _ map[string]string) bool {
 }
 
 // write writes the literal subkey into the strings.Builder.
-func (p literal) write(sb *strings.Builder, _ map[string]string) error {
+func (p literal) write(sb *strings.Builder, _ map[string]string, opts writeOpts) error {
+	if !opts.topLevel {
+		_, err := sb.WriteRune('.')
+		if err != nil {
+			return err
+		}
+	}
+
 	_, err := sb.WriteString(string(p))
 	return err
 }
