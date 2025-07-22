@@ -35,7 +35,7 @@ func (a Authentication) ToStrings() []string {
 }
 
 func ParsePathIntoAccessors(path string) ([]accessor, error) {
-	opts := parseOpts{pathType: viewPath}
+	opts := parseOpts{allowPlaceholders: true}
 	return parsePathIntoAccessors(path, opts)
 }
 

@@ -456,7 +456,7 @@ func parseRule(parent *viewRule, ruleRaw any) ([]*viewRule, error) {
 // If the validation succeeds, it returns lists of typed representations of each
 // path.
 func validateRequestStoragePair(request, storage string) (reqAccessors []accessor, storageAccessors []accessor, err error) {
-	opts := parseOpts{pathType: viewPath, forbidIndexes: true}
+	opts := parseOpts{allowPlaceholders: true, forbidIndexes: true}
 	reqAccessors, err = parsePathIntoAccessors(request, opts)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid request %q: %w", request, err)
@@ -533,24 +533,10 @@ func checkForMatchingPlaceholders(request, storage string, reqPlaceholders, stor
 	return nil
 }
 
-// pathType determines which type of path is being validated, a view path
-// defined in a confdb-schema's rule or a user supplied path. User paths can
-// only contain literal parts while assertion paths can contain placeholders.
-type pathType uint8
-
-const (
-	// viewPath represents a path coming for a view's rule definition which can
-	// have any type of sub-key (including placeholders).
-	viewPath pathType = iota
-	// userPath represents a path supplied by a user which can only include literals
-	// but not placeholders.
-	userPath
-)
-
 type parseOpts struct {
-	pathType         pathType
-	forbidIndexes    bool
-	allowPartialPath bool
+	allowPlaceholders bool
+	forbidIndexes     bool
+	allowPartialPath  bool
 }
 
 // parsePathIntoAccessors validates that the path is composed of (some of these
@@ -584,13 +570,14 @@ func parsePathIntoAccessors(path string, opts parseOpts) ([]accessor, error) {
 		switch {
 		case isKey:
 			accessors = append(accessors, key(subkey))
+
 		case isIndex:
 			if opts.forbidIndexes {
 				return nil, fmt.Errorf("invalid subkey %q: view paths cannot have literal indexes (only index placeholders)", subkey)
 			}
 			accessors = append(accessors, index(subkey[1:len(subkey)-1]))
 
-		case opts.pathType == userPath:
+		case !opts.allowPlaceholders:
 			// user supplied paths cannot contain placeholders
 			var errSuffix string
 			if isKeyPlaceholder || isIndexPlaceholder {
@@ -600,8 +587,10 @@ func parsePathIntoAccessors(path string, opts parseOpts) ([]accessor, error) {
 
 		case isKeyPlaceholder:
 			accessors = append(accessors, keyPlaceholder(subkey[1:len(subkey)-1]))
+
 		case isIndexPlaceholder:
 			accessors = append(accessors, indexPlaceholder(subkey[2:len(subkey)-2]))
+
 		default:
 			return nil, fmt.Errorf("invalid subkey %q", subkey)
 		}
@@ -775,7 +764,7 @@ func (v *View) Set(databag Databag, request string, value any) error {
 		return badRequestErrorFrom(v, "set", request, "")
 	}
 
-	opts := parseOpts{pathType: userPath}
+	opts := parseOpts{allowPlaceholders: false}
 	accessors, err := parsePathIntoAccessors(request, opts)
 	if err != nil {
 		return badRequestErrorFrom(v, "set", request, err.Error())
@@ -860,7 +849,7 @@ func (v *View) Set(databag Databag, request string, value any) error {
 }
 
 func (v *View) Unset(databag Databag, request string) error {
-	opts := parseOpts{pathType: userPath}
+	opts := parseOpts{allowPlaceholders: false}
 	accessors, err := parsePathIntoAccessors(request, opts)
 	if err != nil {
 		return badRequestErrorFrom(v, "unset", request, err.Error())
@@ -1097,10 +1086,7 @@ func getValuesThroughPathsImpl(storagePath string, unmatchedSuffix []accessor, v
 }
 
 func replaceIn(path, key, value string) (string, error) {
-	opts := parseOpts{
-		pathType:         viewPath,
-		allowPartialPath: true,
-	}
+	opts := parseOpts{allowPlaceholders: true, allowPartialPath: true}
 	parts, err := splitViewPath(path, opts)
 	if err != nil {
 		return "", err
@@ -1125,11 +1111,7 @@ func checkForUnusedBranches(value any, paths map[string]struct{}) error {
 		var pathParts []accessor
 
 		if path != "" {
-			opts := parseOpts{
-				pathType:         viewPath,
-				allowPartialPath: true,
-			}
-
+			opts := parseOpts{allowPlaceholders: true, allowPartialPath: true}
 			pathParts, err = parsePathIntoAccessors(path, opts)
 			if err != nil {
 				return err
@@ -1342,7 +1324,7 @@ func (v *View) Get(databag Databag, request string) (any, error) {
 	var accessors []accessor
 	if request != "" {
 		var err error
-		opts := parseOpts{pathType: userPath}
+		opts := parseOpts{allowPlaceholders: false}
 		accessors, err = parsePathIntoAccessors(request, opts)
 		if err != nil {
 			return nil, badRequestErrorFrom(v, "get", request, err.Error())
@@ -1466,7 +1448,7 @@ func (v *View) ReadAffectsEphemeral(requests []string) (bool, error) {
 		requests = []string{""}
 	}
 
-	opts := parseOpts{pathType: userPath}
+	opts := parseOpts{allowPlaceholders: false}
 	var matches []requestMatch
 	for _, request := range requests {
 		accessors, err := parsePathIntoAccessors(request, opts)
@@ -1916,7 +1898,7 @@ func NewJSONDatabag() JSONDatabag {
 // by the path is written. The path can be dotted. For each dot a JSON object
 // is expected to exist (e.g., "a.b" is mapped to {"a": {"b": <value>}}).
 func (s JSONDatabag) Get(path string) (any, error) {
-	opts := parseOpts{pathType: viewPath}
+	opts := parseOpts{allowPlaceholders: true}
 	subKeys, err := parsePathIntoAccessors(path, opts)
 	if err != nil {
 		return nil, err
@@ -2193,7 +2175,7 @@ func unmarshalLevel(subKeys []accessor, index int, rawLevel json.RawMessage) (an
 // in which case, a nested JSON object is created for each sub-key found after a dot.
 // If the value is nil, the entry is deleted.
 func (s JSONDatabag) Set(path string, value any) error {
-	opts := parseOpts{pathType: viewPath}
+	opts := parseOpts{allowPlaceholders: true}
 	subKeys, err := parsePathIntoAccessors(path, opts)
 	if err != nil {
 		return err
@@ -2367,7 +2349,7 @@ func emptyContainerForType(acc accessor) any {
 }
 
 func (s JSONDatabag) Unset(path string) error {
-	opts := parseOpts{pathType: viewPath}
+	opts := parseOpts{allowPlaceholders: true}
 	subKeys, err := parsePathIntoAccessors(path, opts)
 	if err != nil {
 		return err
