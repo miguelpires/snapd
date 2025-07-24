@@ -161,9 +161,9 @@ func badRequestErrorFrom(v *View, operation, request, msg string) *BadRequestErr
 
 // Databag controls access to the confdb data storage.
 type Databag interface {
-	Get(path string) (any, error)
-	Set(path string, value any) error
-	Unset(path string) error
+	Get(path []accessor) (any, error)
+	Set(path []accessor, value any) error
+	Unset(path []accessor) error
 	Data() ([]byte, error)
 }
 
@@ -706,8 +706,8 @@ func (v *View) Schema() *Schema {
 }
 
 type expandedMatch struct {
-	// storagePath is dot-separated storage path without unfilled placeholders.
-	storagePath string
+	// storagePath is a parsed storage path with all placeholders filled in.
+	storagePath []accessor
 
 	// request is the original request field that the request was matched with.
 	request string
@@ -789,23 +789,22 @@ func (v *View) Set(databag Databag, request string, value any) error {
 	}
 
 	// sort less nested paths before more nested ones so that writes aren't overwritten
-	sort.Slice(matches, func(x, y int) bool {
-		return matches[x].storagePath < matches[y].storagePath
-	})
+	getAccs := func(i int) []accessor { return matches[i].storagePath }
+	sort.Slice(matches, byAccessor(matches, getAccs))
 
 	var expandedMatches []expandedMatch
 	suffixes := make(map[string]struct{}, len(matches))
 	for _, match := range matches {
-		pathsToValues, err := getValuesThroughPaths(match.storagePath, match.unmatchedSuffix, value)
+		pathValuePairs, err := getValuesThroughPaths(match.storagePath, match.unmatchedSuffix, value)
 		if err != nil {
 			return badRequestErrorFrom(v, "set", request, err.Error())
 		}
 
-		for path, val := range pathsToValues {
+		for _, pathValuePair := range pathValuePairs {
 			expandedMatches = append(expandedMatches, expandedMatch{
-				storagePath: path,
+				storagePath: pathValuePair.path,
 				request:     match.request,
-				value:       val,
+				value:       pathValuePair.value,
 			})
 		}
 
@@ -823,9 +822,8 @@ func (v *View) Set(databag Databag, request string, value any) error {
 
 	// sort again since we may have unpacked a list into many expanded matches.
 	// Since list Set()s depend on the length of the existing list, the order matters
-	sort.Slice(expandedMatches, func(x, y int) bool {
-		return expandedMatches[x].storagePath < expandedMatches[y].storagePath
-	})
+	getAccs = func(i int) []accessor { return expandedMatches[i].storagePath }
+	sort.Slice(expandedMatches, byAccessor(expandedMatches, getAccs))
 
 	for _, match := range expandedMatches {
 		if err := databag.Set(match.storagePath, match.value); err != nil {
@@ -846,6 +844,29 @@ func (v *View) Set(databag Databag, request string, value any) error {
 	}
 
 	return nil
+}
+
+type match interface{ expandedMatch | requestMatch }
+type accGetter func(i int) []accessor
+
+func byAccessor[T match](matches []T, getAccs accGetter) func(x, y int) bool {
+	return func(x, y int) bool {
+		xPath := getAccs(x)
+		yPath := getAccs(y)
+
+		minLen := int(math.Min(float64(len(xPath)), float64(len(yPath))))
+		for i := 0; i < minLen; i++ {
+			partAcc := xPath[i].access()
+			otherPart := yPath[i].access()
+			if partAcc == otherPart {
+				continue
+			}
+
+			return partAcc < otherPart
+		}
+
+		return len(xPath) < len(yPath)
+	}
 }
 
 func (v *View) Unset(databag Databag, request string) error {
@@ -897,13 +918,8 @@ func (v *View) matchWriteRequest(request []accessor) ([]requestMatch, error) {
 			continue
 		}
 
-		path, err := rule.storagePath(placeholders)
-		if err != nil {
-			return nil, err
-		}
-
 		matches = append(matches, requestMatch{
-			storagePath:     path,
+			storagePath:     rule.storagePath(placeholders),
 			unmatchedSuffix: unmatchedSuffix,
 			request:         rule.originalRequest,
 		})
@@ -1005,7 +1021,12 @@ func schemaTypesStr(types []SchemaType) string {
 // will be used to complete the storage path.
 var getValuesThroughPaths = getValuesThroughPathsImpl
 
-func getValuesThroughPathsImpl(storagePath string, unmatchedSuffix []accessor, val any) (map[string]any, error) {
+type pathValuePair struct {
+	path  []accessor
+	value any
+}
+
+func getValuesThroughPathsImpl(storagePath []accessor, unmatchedSuffix []accessor, val any) ([]pathValuePair, error) {
 	for unmatchedIndex, unmatchedPart := range unmatchedSuffix {
 		switch unmatchedPart.keyType() {
 		case keyPlaceholderType:
@@ -1014,25 +1035,24 @@ func getValuesThroughPathsImpl(storagePath string, unmatchedSuffix []accessor, v
 				return nil, fmt.Errorf(`expected map for unmatched request parts but got %T`, val)
 			}
 
-			storagePathsToValues := make(map[string]any)
+			var pathValuePairs []pathValuePair
 			// suffix has an unmatched placeholder, try all possible values to fill it and
 			// find the corresponding nested value.
 			for cand, candVal := range mapVal {
-				newStoragePath, err := replaceIn(storagePath, unmatchedPart.access(), cand)
+				newStoragePath := replaceAccessorWith(storagePath, unmatchedPart.name(), keyPlaceholderType, key(cand))
+				nestedPathValuePairs, err := getValuesThroughPathsImpl(newStoragePath, unmatchedSuffix[unmatchedIndex+1:], candVal)
 				if err != nil {
 					return nil, err
 				}
 
-				pathsToValues, err := getValuesThroughPathsImpl(newStoragePath, unmatchedSuffix[unmatchedIndex+1:], candVal)
-				if err != nil {
-					return nil, err
-				}
-
-				for path, val := range pathsToValues {
-					storagePathsToValues[path] = val
+				for _, pathValue := range nestedPathValuePairs {
+					pathValuePairs = append(pathValuePairs, pathValuePair{
+						path:  pathValue.path,
+						value: pathValue.value,
+					})
 				}
 			}
-			return storagePathsToValues, nil
+			return pathValuePairs, nil
 
 		case mapKeyType:
 			// use the non-placeholder parts of the suffix to find the value to write
@@ -1054,24 +1074,24 @@ func getValuesThroughPathsImpl(storagePath string, unmatchedSuffix []accessor, v
 
 			// TODO: can this be optimised? Maybe by changing the databag logic to be more
 			// match-aware instead of using these values to expand the matches?
-			storagePathsToValues := make(map[string]any)
+			var pathValuePairs []pathValuePair
 			for i, el := range list {
-				newStoragePath, err := replaceIn(storagePath, unmatchedPart.access(), "["+strconv.Itoa(i)+"]")
+				cand := index(strconv.Itoa(i))
+				newStoragePath := replaceAccessorWith(storagePath, unmatchedPart.name(), indexPlaceholderType, cand)
+				nestedPathValuePairs, err := getValuesThroughPathsImpl(newStoragePath, unmatchedSuffix[unmatchedIndex+1:], el)
 				if err != nil {
 					return nil, err
 				}
 
-				pathsToValues, err := getValuesThroughPathsImpl(newStoragePath, unmatchedSuffix[unmatchedIndex+1:], el)
-				if err != nil {
-					return nil, err
-				}
-
-				for path, val := range pathsToValues {
-					storagePathsToValues[path] = val
+				for _, pathValue := range nestedPathValuePairs {
+					pathValuePairs = append(pathValuePairs, pathValuePair{
+						path:  pathValue.path,
+						value: pathValue.value,
+					})
 				}
 			}
 
-			return storagePathsToValues, nil
+			return pathValuePairs, nil
 
 		case listIndexType:
 			// we don't allow literal indexes in request paths and check this early
@@ -1082,23 +1102,20 @@ func getValuesThroughPathsImpl(storagePath string, unmatchedSuffix []accessor, v
 
 	// we reached the end of the suffix (there are no unmatched placeholders) so
 	// we have the full storage path and final value
-	return map[string]any{storagePath: val}, nil
+	return []pathValuePair{{path: storagePath, value: val}}, nil
 }
 
-func replaceIn(path, key, value string) (string, error) {
-	opts := parseOpts{allowPlaceholders: true, allowPartialPath: true}
-	parts, err := splitViewPath(path, opts)
-	if err != nil {
-		return "", err
-	}
+func replaceAccessorWith(path []accessor, keyName string, accType keyType, newValue accessor) []accessor {
+	replacedPath := make([]accessor, len(path))
+	copy(replacedPath, path)
 
-	for i, part := range parts {
-		if part == key {
-			parts[i] = value
+	for i, part := range replacedPath {
+		if part.keyType() == accType && part.name() == keyName {
+			replacedPath[i] = newValue
 		}
 	}
 
-	return joinPathParts(parts), nil
+	return replacedPath
 }
 
 // checkForUnusedBranches checks that the value is entirely covered by the paths.
@@ -1477,7 +1494,12 @@ func (v *View) ReadAffectsEphemeral(requests []string) (bool, error) {
 
 	schema := []DatabagSchema{v.schema.DatabagSchema}
 	for _, match := range matches {
-		pathParts := strings.Split(match.storagePath, ".")
+		// TODO: temporary
+		pathParts, err := splitViewPath(joinAccessors(match.storagePath), parseOpts{allowPlaceholders: true})
+		if err != nil {
+			return false, err
+		}
+
 		ephemeral, err := anyEphemeralSchema(schema, pathParts)
 		if err != nil {
 			// shouldn't be possible unless there's a view/schema mismatch
@@ -1546,7 +1568,7 @@ func anyEphemeralSchema(schemas []DatabagSchema, pathParts []string) (bool, erro
 type requestMatch struct {
 	// storagePath contains the storage path specified in the matching entry with
 	// any placeholders provided by the request filled in.
-	storagePath string
+	storagePath []accessor
 
 	// unmatchedSuffix contains the nested suffix of the entry's request that
 	// wasn't matched by the request.
@@ -1566,17 +1588,12 @@ func (v *View) matchGetRequest(accessors []accessor) (matches []requestMatch, er
 			continue
 		}
 
-		path, err := rule.storagePath(placeholders)
-		if err != nil {
-			return nil, err
-		}
-
 		if !rule.isReadable() {
 			continue
 		}
 
 		m := requestMatch{
-			storagePath:     path,
+			storagePath:     rule.storagePath(placeholders),
 			unmatchedSuffix: unmatchedSuffix,
 			request:         rule.originalRequest,
 		}
@@ -1590,19 +1607,8 @@ func (v *View) matchGetRequest(accessors []accessor) (matches []requestMatch, er
 
 	// sort matches by namespace (unmatched suffix) to ensure that nested matches
 	// are read after
-	sort.Slice(matches, func(x, y int) bool {
-		xNamespace, yNamespace := matches[x].unmatchedSuffix, matches[y].unmatchedSuffix
-
-		minLen := int(math.Min(float64(len(xNamespace)), float64(len(yNamespace))))
-		for i := 0; i < minLen; i++ {
-			if xNamespace[i].access() == yNamespace[i].access() {
-				continue
-			}
-			return xNamespace[i].access() < yNamespace[i].access()
-		}
-
-		return len(xNamespace) < len(yNamespace)
-	})
+	getAccs := func(i int) []accessor { return matches[i].unmatchedSuffix }
+	sort.Slice(matches, byAccessor(matches, getAccs))
 
 	return matches, nil
 }
@@ -1655,19 +1661,6 @@ func joinAccessors(parts []accessor) string {
 	return sb.String()
 }
 
-func joinPathParts(parts []string) string {
-	var sb strings.Builder
-	for i, part := range parts {
-		if !(strings.HasPrefix(part, "[") || strings.HasSuffix(part, "]") || i == 0) {
-			sb.WriteRune('.')
-		}
-
-		sb.WriteString(part)
-	}
-
-	return sb.String()
-}
-
 func isPlaceholder(part string) bool {
 	return len(part) > 2 && strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}")
 }
@@ -1711,16 +1704,13 @@ func (p *viewRule) match(reqSubkeys []accessor) (matched *matchedPlaceholders, u
 // storagePath takes a matchedPlaceholders struct mapping key and index
 // placeholder names to their values in the view name and returns the path with
 // its placeholder values filled in with the map's values.
-func (p *viewRule) storagePath(matched *matchedPlaceholders) (string, error) {
-	sb := &strings.Builder{}
-
-	opts := writeOpts{topLevel: true}
+func (p *viewRule) storagePath(matched *matchedPlaceholders) []accessor {
+	var accessors []accessor
 	for _, subkey := range p.storage {
-		subkey.write(sb, matched, opts)
-		opts.topLevel = false
+		accessors = append(accessors, subkey.write(matched))
 	}
 
-	return sb.String(), nil
+	return accessors
 }
 
 func (p viewRule) isReadable() bool {
@@ -1739,12 +1729,8 @@ type requestMatcher interface {
 	match(subkey accessor, matched *matchedPlaceholders) bool
 }
 
-type writeOpts struct {
-	topLevel bool
-}
-
 type storageWriter interface {
-	write(sb *strings.Builder, matched *matchedPlaceholders, opts writeOpts)
+	write(matched *matchedPlaceholders) accessor
 }
 
 // placeholder represents a subkey of a name/path (e.g., "{foo}") that can match
@@ -1764,18 +1750,14 @@ func (p keyPlaceholder) match(subkey accessor, matched *matchedPlaceholders) boo
 
 // write writes the value from the matchedPlaceholders entry corresponding to
 // this placeholder key into the strings.Builder.
-func (p keyPlaceholder) write(sb *strings.Builder, matched *matchedPlaceholders, opts writeOpts) {
+func (p keyPlaceholder) write(matched *matchedPlaceholders) accessor {
 	subkey, ok := matched.key[string(p)]
 	if !ok {
 		// placeholder wasn't matched, return the original key in brackets
-		subkey = p.access()
+		return p
 	}
 
-	if !opts.topLevel {
-		sb.WriteRune('.')
-	}
-
-	sb.WriteString(subkey)
+	return key(subkey)
 }
 
 func (p keyPlaceholder) access() string {
@@ -1822,16 +1804,13 @@ func (p indexPlaceholder) match(subkey accessor, matched *matchedPlaceholders) b
 
 // write writes the value from the matchedPlaceholders entry corresponding to
 // this placeholder key into the strings.Builder.
-func (p indexPlaceholder) write(sb *strings.Builder, matched *matchedPlaceholders, _ writeOpts) {
+func (p indexPlaceholder) write(matched *matchedPlaceholders) accessor {
 	subkey, ok := matched.index[string(p)]
 	if !ok {
 		// placeholder wasn't matched, return the original key in brackets
-		subkey = p.access()
-	} else {
-		subkey = "[" + subkey + "]"
+		return p
 	}
-
-	sb.WriteString(subkey)
+	return index(subkey)
 }
 
 func (p indexPlaceholder) access() string   { return "[{" + string(p) + "}]" }
@@ -1846,29 +1825,17 @@ func (k key) match(subkey accessor, _ *matchedPlaceholders) bool {
 	return subkey.keyType() == mapKeyType && string(k) == subkey.name()
 }
 
-// write writes the key into the strings.Builder with a prefixing '.', if it's
-// not the top level accessor.
-func (k key) write(sb *strings.Builder, _ *matchedPlaceholders, opts writeOpts) {
-	if !opts.topLevel {
-		sb.WriteRune('.')
-	}
-	sb.WriteString(k.access())
-}
-
-func (k key) access() string   { return k.name() }
-func (k key) name() string     { return string(k) }
-func (k key) keyType() keyType { return mapKeyType }
+func (k key) write(_ *matchedPlaceholders) accessor { return k }
+func (k key) access() string                        { return k.name() }
+func (k key) name() string                          { return string(k) }
+func (k key) keyType() keyType                      { return mapKeyType }
 
 type index string
 
-// write writes the literal subkey into the strings.Builder.
-func (i index) write(sb *strings.Builder, _ *matchedPlaceholders, _ writeOpts) {
-	sb.WriteString(i.access())
-}
-
-func (i index) access() string   { return "[" + i.name() + "]" }
-func (i index) name() string     { return string(i) }
-func (i index) keyType() keyType { return listIndexType }
+func (i index) write(_ *matchedPlaceholders) accessor { return i }
+func (i index) access() string                        { return "[" + i.name() + "]" }
+func (i index) name() string                          { return string(i) }
+func (i index) keyType() keyType                      { return listIndexType }
 
 type PathError string
 
@@ -1894,16 +1861,9 @@ func NewJSONDatabag() JSONDatabag {
 	return JSONDatabag(make(map[string]json.RawMessage))
 }
 
-// Get takes a path and a pointer to a variable into which the value referenced
-// by the path is written. The path can be dotted. For each dot a JSON object
-// is expected to exist (e.g., "a.b" is mapped to {"a": {"b": <value>}}).
-func (s JSONDatabag) Get(path string) (any, error) {
-	opts := parseOpts{allowPlaceholders: true}
-	subKeys, err := parsePathIntoAccessors(path, opts)
-	if err != nil {
-		return nil, err
-	}
-
+// Get takes a path parsed into accessors and a pointer to a variable into
+// which the result should be written.
+func (s JSONDatabag) Get(subKeys []accessor) (any, error) {
 	// TODO: create this in the return below as well?
 	var value any
 	if err := get(subKeys, 0, s, &value); err != nil {
@@ -1913,9 +1873,9 @@ func (s JSONDatabag) Get(path string) (any, error) {
 	return value, nil
 }
 
-// get takes a dotted path split into sub-keys and uses it to traverse a JSON object.
-// The path's sub-keys can be literals, in which case that value is used to
-// traverse the tree, or a bracketed placeholder (e.g., "{foo}"). For placeholders,
+// get takes a list of accessors, parsed from a path, and uses it to traverse a
+// JSON object. The accessors can be literals, in which case that value is used to
+// traverse the tree, or placeholders (e.g., "{foo}"). For placeholders,
 // we take all sub-paths and try to match the remaining path. The results for
 // any sub-path that matched the request path are then merged in a map and returned.
 func get(subKeys []accessor, index int, node any, result *any) error {
@@ -2171,22 +2131,15 @@ func unmarshalLevel(subKeys []accessor, index int, rawLevel json.RawMessage) (an
 	return mapLevel, nil
 }
 
-// Set takes a path to which the value will be written. The path can be dotted,
-// in which case, a nested JSON object is created for each sub-key found after a dot.
-// If the value is nil, the entry is deleted.
-func (s JSONDatabag) Set(path string, value any) error {
-	opts := parseOpts{allowPlaceholders: true}
-	subKeys, err := parsePathIntoAccessors(path, opts)
-	if err != nil {
-		return err
-	}
-
+// Set takes a list of accessors, parsed from a path, and a value to set at that
+// location. If the value is nil, the entry is removed.
+func (s JSONDatabag) Set(subKeys []accessor, value any) error {
+	var err error
 	if value != nil {
 		_, err = set(subKeys, 0, s, value)
 	} else {
 		_, err = unset(subKeys, 0, s)
 	}
-
 	return err
 }
 
@@ -2348,14 +2301,10 @@ func emptyContainerForType(acc accessor) any {
 	return []json.RawMessage{}
 }
 
-func (s JSONDatabag) Unset(path string) error {
-	opts := parseOpts{allowPlaceholders: true}
-	subKeys, err := parsePathIntoAccessors(path, opts)
-	if err != nil {
-		return err
-	}
-
-	_, err = unset(subKeys, 0, s)
+// Unset takes a list of accessors, parsed from a path, and removes the value
+// they lead to.
+func (s JSONDatabag) Unset(subKeys []accessor) error {
+	_, err := unset(subKeys, 0, s)
 	return err
 }
 

@@ -20,18 +20,29 @@
 package confdb
 
 type (
-	ViewRef = viewRef
+	ViewRef  = viewRef
+	Accessor = accessor
 )
 
 var (
 	GetValuesThroughPaths = getValuesThroughPaths
 	NewAuthentication     = newAuthentication
+	JoinAccessors         = joinAccessors
 )
 
 type Authentication = authentication
 
 func (a Authentication) ToStrings() []string {
 	return a.toStrings()
+}
+
+func PathValuePairsIntoMap(pairs []pathValuePair) map[string]any {
+	pathsToValues := make(map[string]any, len(pairs))
+	for _, pair := range pairs {
+		pathsToValues[joinAccessors(pair.path)] = pair.value
+	}
+
+	return pathsToValues
 }
 
 func ParsePathIntoAccessors(path string) ([]accessor, error) {
