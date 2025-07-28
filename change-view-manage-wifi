@@ -1,0 +1,10 @@
+#!/bin/bash -xe
+
+# prefix the SSID with "acme", if not already present
+value=$(snapctl get --view :manage-wifi ssid)
+if [[ "$?" -eq 0 && "$value" != acme-* ]]; then
+	snapctl set --view :manage-wifi ssid="acme-$value"
+else
+	echo "exit code: $?"
+	echo "result: $value"
+fi

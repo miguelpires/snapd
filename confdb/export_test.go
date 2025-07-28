@@ -20,14 +20,12 @@
 package confdb
 
 type (
-	ViewRef  = viewRef
-	Accessor = accessor
+	ViewRef = viewRef
 )
 
 var (
 	GetValuesThroughPaths = getValuesThroughPaths
 	NewAuthentication     = newAuthentication
-	JoinAccessors         = joinAccessors
 )
 
 type Authentication = authentication
@@ -39,15 +37,10 @@ func (a Authentication) ToStrings() []string {
 func PathValuePairsIntoMap(pairs []pathValuePair) map[string]any {
 	pathsToValues := make(map[string]any, len(pairs))
 	for _, pair := range pairs {
-		pathsToValues[joinAccessors(pair.path)] = pair.value
+		pathsToValues[JoinAccessors(pair.path)] = pair.value
 	}
 
 	return pathsToValues
-}
-
-func ParsePathIntoAccessors(path string) ([]accessor, error) {
-	opts := parseOpts{allowPlaceholders: true}
-	return parsePathIntoAccessors(path, opts)
 }
 
 func MockMaxValueDepth(newDepth int) (restore func()) {

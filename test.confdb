@@ -1,0 +1,112 @@
+type: confdb-schema
+authority-id: NI7Jstuu8gffcoXr02i1kYt898p6Co0A
+account-id: NI7Jstuu8gffcoXr02i1kYt898p6Co0A
+name: network
+timestamp: 2025-03-21T11:51:32Z
+views:
+  wifi-setup:
+    rules:
+      -
+        request: ssids
+        storage: wifi.ssids
+      -
+        request: ssid
+        storage: wifi.ssid
+      -
+        request: password
+        storage: wifi.psk
+      -
+        request: status
+        storage: wifi.status
+body-length: 452
+sign-key-sha3-384: 74KHeq1foVfZGbtTrm-abyRPSvabpBG8bTkICQbtrSykKj6P2obltbsSP7rXMmJK
+
+{
+  "storage": {
+    "schema": {
+      "wifi": {
+        "schema": {
+          "psk": {
+            "type": "string"
+          },
+          "ssid": "string",
+          "ssids": {
+            "type": "array",
+            "unique": true,
+            "values": "string"
+          },
+          "status": {
+            "choices": [
+              "on",
+              "off"
+            ],
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
+
+AcLBcwQAAQoAHRYhBNZz2pAPEwnvCBlCWDJ7flC3CTN3BQJod7XVAAoJEDJ7flC3CTN3cTcP/2Tq
+eMGSg2ga0f1x/tfloNjFbZHNxOGQn9rhnMTxgsjVoc+FOxBaTueNXvRBp3KvdEvndsbXJO7jrCSc
+Lj+Lq8qJD5zG3X4x8eN8g6sWHEOKprDKcLV768BAlNNB222ciuAzgWTKsHy6CBlYCWuaOgRqTkmk
+/DipYh2mGz0hwuAyFpCAvQQMJy1VYhCsG3Zx+nU5nQRIEPf0N0VM0Q+GEvsVSwjGlC50lqW5gtDY
+mwsbtgya4NzHkoDBsZwG26QjaOZFPvdzNzF4D5VtoGZYSmfraUeQMX4I8cyywEvKlLKzE8IQzxMd
+ZLiIHIzvkJyVoKvrs2tBClYYZsjETS3LkU94du7eyned4r6FWdLWWeIXO7NCMGQdVf0cV8f9R/E/
+VT8p1QOiR1tEO559b4jN0nbN1cH3lCgCvc+O69KsKbd5MCugSRq8sUQpMLPYVjzgWuMnxwqD0Q+Z
+FbU4YyKxR1nL0Vko6qsjV4E2e86ftvX24qcxaPB0RUtoTi9EPkAr+Cu2EY25JDGwS5ov1SU/71Pm
+cSNZD5ITIfF09+Ce2ZWjtye+RJe243iid3jK33Vm5jbfYxxGlfw6+yB9SHPacj6+xD5qM0+J2DGh
+wPc/XHMnVPQcVfjEuMB/mPloCqm85tRUy8dkFKk/iTUz7RxFDktuobDquHGaOGe+qHCKy3y+
+
+type: account-key
+authority-id: canonical
+public-key-sha3-384: 74KHeq1foVfZGbtTrm-abyRPSvabpBG8bTkICQbtrSykKj6P2obltbsSP7rXMmJK
+account-id: NI7Jstuu8gffcoXr02i1kYt898p6Co0A
+name: test-key
+since: 2024-10-09T17:11:04Z
+body-length: 717
+sign-key-sha3-384: BWDEoaqyr25nF5SNCvEv2v7QnM9QsfCc0PBMYD_i2NGSQ32EF2d4D0hqUel3m8ul
+
+AcbBTQRWhcGAARAAw1ISIx0qbGzghTtkXQZyymBJ3kJEaR9ds7yhkEZKJo6JR7fYJHAqIHWgzaxh
+90DBXIvcXlAFWE1I3F3LJ+V4bAWEnt2+sLYQ2UKPVqaR2uobOBL6W3l7Cw87No3ZRg7ajdiNQ30c
+MIo72MOY2HonbzkCldeJCtaBH5iaQI6ZHqqaiFfR93PfVnAQ2OlXbAsd4IEM3ZMGrYUnlUjXJIIf
+ldIzc/d8wAql4GMpUx63/Q2cGzZKaZHvjv6uYvWoiBF4kW1xQjGL9xRrGkM/QY6DIEm+5xYRH5d2
+QVVIK3n9+tnHk8jRY7eodX5WHnfN5THtJwFxbR4Drb0vLUkXE9Sw1CzD1TSUkCW5cfqi6xDnExW3
+pUWeO85kRogH4O1WZNBLOFwiZtcCR7zjibzO+N6FWPuM5tGtvavVa7YWl1o/mz7kIdlhnHXaVD+a
+1N4yPTrAoYCh2fCIms8+DhGu8VMQIBsqTkedf6sBSNP6qMup4DVbPawTB7GeOvTyO71/s6Lr+khM
+xCAaQ9V3ZpBU/xEt5u5BdRB10OoPJPcctAbKjmE8Y2XKwTpmOjRCDHpa2Q+AdD1qMH8U9di4DTei
+qinsiU9f5StYqaFHK6ywSZ9AOCm77VuJEM3ri+NImRWQafMnAx9y5nqwCrC5PVzbMnjwM/LubobG
+yEtw+KrG+UnDgqkAEQEAAQ==
+
+AcLBUgQAAQoABgUCZwa5LAAArjkQAI+lnMQz2jkiCILicQVLjSciuPZKEjUT6Ci2oMNgOatbJUC+
+8kNw08uDPfUb+MSCsZBV3XbCREH5U/QhiprdOX9TuwGENdZGBqP5hp4uOiFUbvVkme9s88v5Tep7
+8ZPsQvS9K3tY/yXfTwzkB6i5l7HUWbiEQOfFP4QnDIElG4ZqzwwrW/42oLJzOE6VZggd8+2ajpns
+xJ8ZSU5H+OwrpPHPKpRsPinIiveIAUbXg3f9Crvlr4S9mHJ+r7inr7eGqq1OdtP81067Jg2se/Zx
+aZdwOg986BQIB6QfDcqBHsdkR238eBWGj6O5d0ldURxGrLzwH83KBBsRiW2TveDRaqJOM7ers3Pn
+0yJTmuq85vLvnDeOL9mJQ/t6XI2pE5KMVkuvvjKqRngW5tj5UYC/jayK0aHfOHQM6V99mr7dJV3t
+qEC3e9jMPjTclzIgaHki/skD7t1BMNLa4siOwi1FhrnXPKBqQj6sNj6nkzHJPAXhGCKN+S1X7Zbe
+G9Z1SfmyWdu5tFhU+2XMdbvVPrzH7kFEZ+Hw1OEbTk/+htqIv28ICQYIhohxKZfW8edN1K+L/knn
+VQo+z1Q1DLzcs73p601Wm6I4DEij0Dz8mHBE2a3VJt/W1mSA/gdzyD9BCE+nDCNVxDSopfbv1Z61
+CcUvdL/Vy8UEGHuXU77nRbJ+sFAW
+
+type: account
+authority-id: canonical
+revision: 1
+account-id: NI7Jstuu8gffcoXr02i1kYt898p6Co0A
+display-name: Miguel Pires
+timestamp: 2022-06-07T08:44:05.378502Z
+username: miguelpires1
+validation: unproven
+sign-key-sha3-384: BWDEoaqyr25nF5SNCvEv2v7QnM9QsfCc0PBMYD_i2NGSQ32EF2d4D0hqUel3m8ul
+
+AcLBUgQAAQoABgUCYp8P1QAAgIQQACmgiZEP/7S2xsGs2wnD57mE33jsSQKI0DIiNXE9xvSDr7jb
+AcZeHEPhbs4X2/gsrQd++vE8jJxS/4TkEG13pk5FSjLBI1fw5jAkVD6+L6wfzzZJ9W+tlmPZ2YtY
+6XjuRZ6jLbzmBOgdvsiKgGJK5NDIdpzfB+W436kYwRPIPWjdrMFfzxveabpm4m6Ho1UV35+q5qCK
+RhkNuDzPUszYO1dWEKL4E0JDSYVX/3cg7GloTFiEutk1+Vr2dkjEn+nFopfR2kafNA7woWatTrtH
+hVM1wZdIZ1Dmqwux1e2KUNXYKelrbCAz8LmkMAgoBQGy+Sbacbwn08VPC7Ll6jjqo7BTnXbk9DpG
+SexLdki44TlDv3hMFUMgqol2gsVwMV+KW4oo5qHCi/bZirMNX7cKz7nAeBCy5fgNO/aHllSnH/hu
+5PdsK0ZscTTzjyLLbREGu4ggFFYVDhfRgrhFRQ1oHRNF+lsp0/kzv2RIzjqzzAtN6/2pmUudtvIt
+T8rjFH7eRX4ZJ8ehJp2DkGF7nxiV4ZACtphqmi1IT+PYBIZ+3dPg9KWagYSdwbK39R9la8xp0R51
+0PZuDpdxbZ1Scy3oLYQfRcGJ7O2jXBa/JdqVObWNOvWXbF8tNuYHt5FvI/9df3fp+U/CfIDbWENH
+rJUG9MRy7J2p1KF0iN/nVno9h0Wp

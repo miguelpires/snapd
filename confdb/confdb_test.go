@@ -41,7 +41,7 @@ type failingSchema struct {
 }
 
 func (f *failingSchema) Validate([]byte) error { return f.err }
-func (f *failingSchema) SchemaAt(path []string) ([]confdb.DatabagSchema, error) {
+func (f *failingSchema) SchemaAt(path []confdb.Accessor) ([]confdb.DatabagSchema, error) {
 	return []confdb.DatabagSchema{f}, nil
 }
 func (f *failingSchema) Type() confdb.SchemaType { return confdb.Any }
@@ -49,7 +49,7 @@ func (f *failingSchema) Ephemeral() bool         { return false }
 func (f *failingSchema) NestedEphemeral() bool   { return false }
 
 func parsePath(c *C, path string) []confdb.Accessor {
-	accs, err := confdb.ParsePathIntoAccessors(path)
+	accs, err := confdb.ParsePathIntoAccessors(path, confdb.ParseOptions{})
 	c.Assert(err, IsNil)
 	return accs
 }
@@ -1916,6 +1916,60 @@ func (*viewSuite) TestSchemaMismatchCheckDifferentLevelPaths(c *C) {
 	c.Assert(err, IsNil)
 }
 
+func (*viewSuite) TestSchemaMismatchPlaceholder(c *C) {
+	schemaStr := []byte(`{
+	"schema": {
+		"foo": {
+			"schema": {
+				"a": "string",
+				"b": {
+					"type": "array",
+					"values": "string"
+				}
+			}
+		},
+		"baz": {
+			"schema": {
+				"a": "string",
+				"b": "int"
+			}
+		}
+	}
+}`)
+	schema, err := confdb.ParseStorageSchema(schemaStr)
+	c.Assert(err, IsNil)
+
+	_, err = confdb.NewSchema("acc", "confdb", map[string]any{
+		"foo": map[string]any{
+			"rules": []any{
+				map[string]any{"request": "foo.{bar}[{n}]", "storage": "foo.{bar}[{n}]"},
+			},
+		},
+	}, schema)
+	c.Assert(err, IsNil)
+
+	schemaStr = []byte(`{
+	"schema": {
+		"baz": {
+			"schema": {
+				"b": "int"
+			}
+		}
+	}
+}`)
+	schema, err = confdb.ParseStorageSchema(schemaStr)
+	c.Assert(err, IsNil)
+
+	_, err = confdb.NewSchema("acc", "confdb", map[string]any{
+		"foo": map[string]any{
+			"rules": []any{
+				map[string]any{"request": "baz.{bar}[{n}]", "storage": "baz.{bar}[{n}]"},
+			},
+		},
+	}, schema)
+	c.Assert(err, ErrorMatches, `.*storage path "baz.{bar}\[{n}\]" for request "baz.{bar}\[{n}\]" is invalid after "baz.{bar}": cannot follow path beyond "int" type`)
+}
+
 func (*viewSuite) TestSchemaMismatchCheckMultipleAlternativeTypesHappy(c *C) {
 	schemaStr := []byte(`{
 	"schema": {
@@ -2198,8 +2252,13 @@ func (s *viewSuite) TestGetValuesThroughPaths(c *C) {
 
 	for i, tc := range tcs {
 		cmt := Commentf("failed test number %d", i+1)
-		suffix := parsePath(c, tc.suffix)
-		path := parsePath(c, tc.path)
+		opts := confdb.ParseOptions{AllowPlaceholders: true}
+		suffix, err := confdb.ParsePathIntoAccessors(tc.suffix, opts)
+		c.Assert(err, IsNil)
+
+		path, err := confdb.ParsePathIntoAccessors(tc.path, opts)
+		c.Assert(err, IsNil)
+
 		pathValuePairs, err := confdb.GetValuesThroughPaths(path, suffix, tc.value)
 
 		if tc.err != "" {
@@ -2840,7 +2899,8 @@ func (*viewSuite) TestGetAffectedViews(c *C) {
 		schema, err := confdb.NewSchema("acc", "db", tc.views, confdb.NewJSONSchema())
 		c.Assert(err, IsNil, cmt)
 
-		affectedViews := schema.GetViewsAffectedByPath(tc.modified)
+		modified := parsePath(c, tc.modified)
+		affectedViews := schema.GetViewsAffectedByPath(modified)
 		c.Assert(affectedViews, HasLen, len(tc.affected), cmt)
 
 		viewNames := make([]string, 0, len(affectedViews))
@@ -3017,7 +3077,14 @@ func (*viewSuite) TestCheckWriteEphemeralAccess(c *C) {
 	v := schema.View("my-view")
 	for i, tc := range tcs {
 		cmt := Commentf("failed test number %d", i+1)
-		eph, err := v.WriteAffectsEphemeral(tc.requests)
+		var paths [][]confdb.Accessor
+		for _, req := range tc.requests {
+			path, err := confdb.ParsePathIntoAccessors(req, confdb.ParseOptions{})
+			c.Assert(err, IsNil)
+			paths = append(paths, path)
+		}
+
+		eph, err := v.WriteAffectsEphemeral(paths)
 		if tc.err != "" {
 			c.Check(err, ErrorMatches, tc.err, cmt)
 		} else {

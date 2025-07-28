@@ -1,0 +1,13 @@
+name: test-custodian
+version: 1.0
+apps:
+  sh:
+    command: /bin/sh
+base: core24
+
+plugs:
+  manage-wifi:
+    interface: confdb
+    account: NI7Jstuu8gffcoXr02i1kYt898p6Co0A
+    view: network/wifi-setup
+    role: custodian
