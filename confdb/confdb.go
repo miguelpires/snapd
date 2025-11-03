@@ -766,19 +766,19 @@ func splitViewPath(path string, opts ParseOptions) ([]subkeyWithFilters, error) 
 func parseFieldFilter(filter string) (FieldFilter, error) {
 	// Remove outer brackets: "[.foo={bar}]" -> ".foo={bar}"
 	inner := filter[1 : len(filter)-1]
-	
+
 	// Split on '=' to get field and placeholder: ".foo" and "{bar}"
 	parts := strings.SplitN(inner, "=", 2)
 	if len(parts) != 2 {
 		return FieldFilter{}, fmt.Errorf("invalid filter format: %q", filter)
 	}
-	
+
 	// Remove leading dot from field: ".foo" -> "foo"
 	field := strings.TrimPrefix(parts[0], ".")
-	
+
 	// Remove braces from placeholder: "{bar}" -> "bar"
 	placeholder := strings.TrimPrefix(strings.TrimSuffix(parts[1], "}"), "{")
-	
+
 	return FieldFilter{
 		Field:       field,
 		Placeholder: placeholder,
