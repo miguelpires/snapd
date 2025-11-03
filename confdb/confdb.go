@@ -220,6 +220,7 @@ var (
 	validIndexSubkey      = regexp.MustCompile(`^\[[0-9]+\]$`)
 	validPlaceholder      = regexp.MustCompile(fmt.Sprintf("^{%s}$", subkeyRegex))
 	validIndexPlaceholder = regexp.MustCompile(fmt.Sprintf("^\\[{%s}\\]$", subkeyRegex))
+	validFieldFilter      = regexp.MustCompile(fmt.Sprintf("^\\[\\.%s={%s}\\]", subkeyRegex, subkeyRegex))
 	// TODO: decide on what the format should be for aliases in schemas
 	validAliasName = validSubkey
 	subkeyRegex    = "[a-z](?:-?[a-z0-9])*"
@@ -565,9 +566,11 @@ type ParseOptions struct {
 //     optionally with dashes between alphanumeric characters (e.g., "a-b-c")
 //   - placeholder subkeys are composed of non-placeholder subkeys wrapped in curly brackets
 //   - bracketed subkeys that aren't placeholders can only contain integers
+//   - field filters in the form [.field={placeholder}] that appear after accessors
 //
 // If the validation succeeds, it returns an []accessor which contains typed
 // representations of each type of subkey (e.g., key placeholder, index, etc).
+// Field filters are attached to their corresponding accessor.
 func ParsePathIntoAccessors(path string, opts ParseOptions) ([]Accessor, error) {
 	if path == "" {
 		return nil, nil
@@ -579,20 +582,22 @@ func ParsePathIntoAccessors(path string, opts ParseOptions) ([]Accessor, error) 
 	}
 
 	accessors := make([]Accessor, 0, len(subkeys))
-	for _, subkey := range subkeys {
+	for _, subkeyData := range subkeys {
+		subkey := subkeyData.subkey
 		isKey := validSubkey.MatchString(subkey)
 		isIndex := validIndexSubkey.MatchString(subkey)
 		isKeyPlaceholder := validPlaceholder.MatchString(subkey)
 		isIndexPlaceholder := validIndexPlaceholder.MatchString(subkey)
 
+		var acc Accessor
 		switch {
 		case isKey:
-			accessors = append(accessors, key(subkey))
+			acc = key(subkey)
 		case isIndex:
 			if opts.ForbidIndexes {
 				return nil, fmt.Errorf("invalid subkey %q: view paths cannot have literal indexes (only index placeholders)", subkey)
 			}
-			accessors = append(accessors, index(subkey[1:len(subkey)-1]))
+			acc = index(subkey[1 : len(subkey)-1])
 
 		case !opts.AllowPlaceholders:
 			// user supplied paths cannot contain placeholders
@@ -603,12 +608,22 @@ func ParsePathIntoAccessors(path string, opts ParseOptions) ([]Accessor, error) 
 			return nil, fmt.Errorf("invalid subkey %q%s", subkey, errSuffix)
 
 		case isKeyPlaceholder:
-			accessors = append(accessors, keyPlaceholder(subkey[1:len(subkey)-1]))
+			acc = keyPlaceholder(subkey[1 : len(subkey)-1])
 		case isIndexPlaceholder:
-			accessors = append(accessors, indexPlaceholder(subkey[2:len(subkey)-2]))
+			acc = indexPlaceholder(subkey[2 : len(subkey)-2])
 		default:
 			return nil, fmt.Errorf("invalid subkey %q", subkey)
 		}
+
+		// If there are filters, wrap the accessor
+		if len(subkeyData.filters) > 0 {
+			acc = &accessorWithFilters{
+				Accessor: acc,
+				filters:  subkeyData.filters,
+			}
+		}
+
+		accessors = append(accessors, acc)
 	}
 
 	return accessors, nil
@@ -623,6 +638,16 @@ const (
 	IndexPlaceholderType
 )
 
+// FieldFilter represents a filter that can be attached to an accessor.
+// Filters take the form [.field={placeholder}] and are stored for later access
+// but don't affect path matching.
+type FieldFilter struct {
+	// Field is the field name in the filter (e.g., "foo" in [.foo={bar}])
+	Field string
+	// Placeholder is the placeholder name (e.g., "bar" in [.foo={bar}])
+	Placeholder string
+}
+
 type Accessor interface {
 	// Name returns the value of the path sub-key excluding any separators (dots
 	// or brackets), both for literal and placeholders.
@@ -636,9 +661,38 @@ type Accessor interface {
 	Type() AccessorType
 }
 
-func splitViewPath(path string, opts ParseOptions) ([]string, error) {
-	var subkeys []string
+// GetFilters returns the field filters for a given Accessor, if any.
+// Filters are stored separately and associated with accessors when they are parsed.
+func GetFilters(acc Accessor) []FieldFilter {
+	if af, ok := acc.(interface{ Filters() []FieldFilter }); ok {
+		return af.Filters()
+	}
+	return nil
+}
+
+// accessorWithFilters wraps an Accessor with optional field filters.
+type accessorWithFilters struct {
+	Accessor
+	filters []FieldFilter
+}
+
+// Filters returns the field filters attached to this accessor.
+func (a *accessorWithFilters) Filters() []FieldFilter {
+	return a.filters
+}
+
+// subkeyWithFilters represents a parsed subkey along with any filters attached to it
+type subkeyWithFilters struct {
+	subkey  string
+	filters []FieldFilter
+}
+
+func splitViewPath(path string, opts ParseOptions) ([]subkeyWithFilters, error) {
+	var subkeys []subkeyWithFilters
 	sb := &strings.Builder{}
+	var currentFilters []FieldFilter
+	pathRunes := []rune(path)
+	i := 0
 
 	finishSubkey := func() error {
 		if sb.Len() == 0 {
@@ -649,12 +703,37 @@ func splitViewPath(path string, opts ParseOptions) ([]string, error) {
 			}
 			return errors.New("cannot have empty subkeys")
 		}
-		subkeys = append(subkeys, sb.String())
+		subkeys = append(subkeys, subkeyWithFilters{
+			subkey:  sb.String(),
+			filters: currentFilters,
+		})
 		sb.Reset()
+		currentFilters = nil
 		return nil
 	}
 
-	for _, c := range path {
+	for i < len(pathRunes) {
+		c := pathRunes[i]
+
+		// Check if we're at a filter
+		if c == '[' && i+1 < len(pathRunes) && pathRunes[i+1] == '.' {
+			remaining := string(pathRunes[i:])
+			loc := validFieldFilter.FindStringIndex(remaining)
+			if loc != nil && loc[0] == 0 {
+				// Found a filter - parse and store it
+				match := remaining[loc[0]:loc[1]]
+				filter, err := parseFieldFilter(match)
+				if err != nil {
+					return nil, err
+				}
+				currentFilters = append(currentFilters, filter)
+				// Skip past the filter
+				i += len([]rune(match))
+				continue
+			}
+		}
+
+		// Handle regular path parsing
 		switch c {
 		case '.':
 			if err := finishSubkey(); err != nil {
@@ -672,6 +751,7 @@ func splitViewPath(path string, opts ParseOptions) ([]string, error) {
 		default:
 			sb.WriteRune(c)
 		}
+		i++
 	}
 
 	// there should be a subkey to be finished (paths like "a." are invalid)
@@ -680,6 +760,29 @@ func splitViewPath(path string, opts ParseOptions) ([]string, error) {
 	}
 
 	return subkeys, nil
+}
+
+// parseFieldFilter parses a field filter string like "[.foo={bar}]" and returns a FieldFilter
+func parseFieldFilter(filter string) (FieldFilter, error) {
+	// Remove outer brackets: "[.foo={bar}]" -> ".foo={bar}"
+	inner := filter[1 : len(filter)-1]
+	
+	// Split on '=' to get field and placeholder: ".foo" and "{bar}"
+	parts := strings.SplitN(inner, "=", 2)
+	if len(parts) != 2 {
+		return FieldFilter{}, fmt.Errorf("invalid filter format: %q", filter)
+	}
+	
+	// Remove leading dot from field: ".foo" -> "foo"
+	field := strings.TrimPrefix(parts[0], ".")
+	
+	// Remove braces from placeholder: "{bar}" -> "bar"
+	placeholder := strings.TrimPrefix(strings.TrimSuffix(parts[1], "}"), "{")
+	
+	return FieldFilter{
+		Field:       field,
+		Placeholder: placeholder,
+	}, nil
 }
 
 // countAccessorsOfType returns the number of occurrences of path sub-keys of
