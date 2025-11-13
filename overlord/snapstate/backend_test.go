@@ -481,6 +481,9 @@ func (f *fakeStore) lookupRefresh(cand refreshCand) (*snap.Info, error) {
 	case "":
 		panic("store refresh APIs expect snap-ids")
 	case "other-snap-id":
+		if cand.revision == snap.R(404) {
+			return nil, &store.RevisionNotAvailableError{}
+		}
 		return nil, store.ErrNoUpdateAvailable
 	case "fakestore-please-error-on-refresh":
 		return nil, fmt.Errorf("failing as requested")
@@ -772,6 +775,7 @@ func (f *fakeStore) SnapAction(ctx context.Context, currentSnaps []*store.Curren
 	refreshErrors := make(map[string]error)
 	installErrors := make(map[string]error)
 	downloadErrors := make(map[string]error)
+	var otherErrors []error
 	var res []store.SnapActionResult
 	for _, a := range sorted {
 		switch a.Action {
@@ -825,7 +829,6 @@ func (f *fakeStore) SnapAction(ctx context.Context, currentSnaps []*store.Curren
 		}
 
 		// refresh
-
 		cur := curByInstanceName[a.InstanceName]
 		if cur == nil {
 			return nil, nil, fmt.Errorf("internal error: no matching current snap for %q", a.InstanceName)
@@ -847,6 +850,11 @@ func (f *fakeStore) SnapAction(ctx context.Context, currentSnaps []*store.Curren
 			block:            cur.Block,
 			ignoreValidation: ignoreValidation,
 		}
+
+		if a.Revision == snap.R(404) {
+			cand.revision = a.Revision
+		}
+
 		info, err := f.lookupRefresh(cand)
 		var hit snap.Revision
 		if info != nil {
@@ -865,6 +873,12 @@ func (f *fakeStore) SnapAction(ctx context.Context, currentSnaps []*store.Curren
 		if err == store.ErrNoUpdateAvailable {
 			refreshErrors[cur.InstanceName] = err
 			continue
+		}
+		if errors.As(err, new(*store.RevisionNotAvailableError)) {
+			refreshErrors[cur.InstanceName] = err
+			// for testing single update failures when other errors occur, see comment
+			// in snapstate_update_test#TestUpdateSingleWithRevisionOtherErrors
+			otherErrors = append(otherErrors, errors.New("unathenticated user error"))
 		}
 		if err != nil {
 			return nil, nil, err
@@ -889,11 +903,13 @@ func (f *fakeStore) SnapAction(ctx context.Context, currentSnaps []*store.Curren
 		if len(downloadErrors) == 0 {
 			downloadErrors = nil
 		}
+
 		return res, nil, &store.SnapActionError{
 			NoResults: len(refreshErrors)+len(installErrors)+len(downloadErrors)+len(res) == 0,
 			Refresh:   refreshErrors,
 			Install:   installErrors,
 			Download:  downloadErrors,
+			Other:     otherErrors,
 		}
 	}
 

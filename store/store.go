@@ -718,11 +718,13 @@ func decodeJSONBody(resp *http.Response, success any, failure any) error {
 
 // retryRequestDecodeJSON calls retryRequest and decodes the response into either success or failure.
 func (s *Store) retryRequestDecodeJSON(ctx context.Context, reqOptions *requestOptions, user *auth.UserState, success any, failure any) (resp *http.Response, err error) {
-	return httputil.RetryRequest(reqOptions.URL.String(), func() (*http.Response, error) {
+	doRequest := func() (*http.Response, error) {
 		return s.doRequest(ctx, s.client, reqOptions, user)
-	}, func(resp *http.Response) error {
+	}
+	readRespBody := func(resp *http.Response) error {
 		return decodeJSONBody(resp, success, failure)
-	}, defaultRetryStrategy)
+	}
+	return httputil.RetryRequest(reqOptions.URL.String(), doRequest, readRespBody, defaultRetryStrategy)
 }
 
 // doRequest does an authenticated request to the store handling a potential macaroon refresh required if needed

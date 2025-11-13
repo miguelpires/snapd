@@ -142,14 +142,9 @@ type SnapActionError struct {
 
 // SingleOpError returns the single operation, snap name, and error if
 // e represents a single error of a single operation on a single snap
-// (i.e. if e.Other is empty, and e.Refresh, e.Install and e.Download
-// have a single error in total).
+// (i.e. if e.Refresh, e.Install and e.Download have a single error in total).
 // In any other case, the error returned will be nil.
 func (e SnapActionError) SingleOpError() (op, name string, err error) {
-	if len(e.Other) > 0 {
-		return "", "", nil
-	}
-
 	nRefresh := len(e.Refresh)
 	nInstall := len(e.Install)
 	nDownload := len(e.Download)

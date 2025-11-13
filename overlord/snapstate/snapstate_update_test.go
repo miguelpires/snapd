@@ -18752,3 +18752,27 @@ func (s *snapmgrTestSuite) TestBlockUnlinkAffectingHook(c *C) {
 		}
 	}
 }
+
+func (s *snapmgrTestSuite) TestUpdateSingleWithRevisionOtherErrors(c *C) {
+	// this checks we fail in the right way when the SnapAction carries more than
+	// one error which can happen for some single updates (ctrl-F allow_unauthenticated
+	// in https://api.snapcraft.io/docs/refresh/#snap-refresh)
+	s.state.Lock()
+	defer s.state.Unlock()
+
+	si := &snap.SideInfo{
+		RealName: "other-snap",
+		SnapID:   "other-snap-id",
+		Revision: snap.R(1),
+	}
+	snapstate.Set(s.state, "other-snap", &snapstate.SnapState{
+		Active:   true,
+		Current:  si.Revision,
+		Sequence: snapstatetest.NewSequenceFromSnapSideInfos([]*snap.SideInfo{si}),
+	})
+
+	revOpts := &snapstate.RevisionOptions{Revision: snap.R(404)}
+	tss, err := snapstate.Update(s.state, "other-snap", revOpts, 0, snapstate.Flags{})
+	c.Assert(err, ErrorMatches, "no snap revision available as specified")
+	c.Assert(tss, IsNil)
+}
