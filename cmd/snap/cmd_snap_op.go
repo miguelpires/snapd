@@ -92,8 +92,8 @@ The refresh command updates the specified snaps, or all snaps in the system if
 none are specified.
 
 With no further options, the snaps are refreshed to the current revision of the
-channel they're tracking, preserving their confinement options. All available
-channels of a snap are listed in its 'snap info' output.
+channel they're tracking, preserving the same or stricter confinement options.
+All available channels of a snap are listed in its 'snap info' output.
 
 When --revision is used, a later refresh will typically undo the revision
 override.
