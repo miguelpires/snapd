@@ -35,6 +35,7 @@ import (
 
 	"github.com/snapcore/snapd/client/clientutil"
 	"github.com/snapcore/snapd/dirs"
+	"github.com/snapcore/snapd/logger"
 	"github.com/snapcore/snapd/systemd"
 )
 
@@ -520,8 +521,22 @@ func (client *Client) PendingRefreshNotification(ctx context.Context, refreshInf
 	if err != nil {
 		return err
 	}
-	_, err = client.doMany(ctx, "POST", "/v1/notifications/pending-refresh", nil, headers, reqBody)
-	return err
+	responses, err := client.doMany(ctx, "POST", "/v1/notifications/pending-refresh", nil, headers, reqBody)
+	if err != nil {
+		return err
+	}
+
+	if len(responses) == 0 {
+		logger.Debugf("cannot find user session to notify about pending refresh (%s)", refreshInfo.InstanceName)
+	} else {
+		for _, resp := range responses {
+			if resp.err != nil {
+				logger.Noticef("notification of pending refresh (%s) failed: %v", refreshInfo.InstanceName, resp.err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // FinishedSnapRefreshInfo holds information about a finished refresh provided to userd.

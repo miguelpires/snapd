@@ -24,6 +24,11 @@ prepare: |
   snap refresh
   snap install test-snapd-sh
 
+  if os.query is-ubuntu && os.query is-classic &&
+    ! systemctl --user --global is-enabled snapd.session-agent.socket; then
+    systemctl --user --global enable snapd.session-agent.socket
+  fi
+
 restore: |
   snap remove --purge test-snapd-sh || true
 

@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ import (
 	. "gopkg.in/check.v1"
 
 	"github.com/snapcore/snapd/dirs"
+	"github.com/snapcore/snapd/logger"
 	"github.com/snapcore/snapd/testutil"
 	"github.com/snapcore/snapd/usersession/client"
 )
@@ -743,4 +745,37 @@ func (s *clientSuite) TestPendingRefreshNotificationOneClient(c *C) {
 	err := cli.PendingRefreshNotification(context.Background(), &client.PendingSnapRefreshInfo{})
 	c.Assert(err, IsNil)
 	c.Check(atomic.LoadInt32(&n), Equals, int32(1))
+}
+
+func (s *clientSuite) TestPendingRefreshNotificationNoSessions(c *C) {
+	logbuf, restore := logger.MockDebugLogger()
+	defer restore()
+
+	// remove the per-user snapd-session-agent sockets so that the client
+	// finds no active sessions to target
+	c.Assert(s.server.Shutdown(context.Background()), IsNil)
+	c.Assert(os.RemoveAll(dirs.XdgRuntimeDirBase), IsNil)
+
+	info := &client.PendingSnapRefreshInfo{InstanceName: "some-snap"}
+	err := s.cli.PendingRefreshNotification(context.Background(), info)
+	c.Check(err, IsNil)
+	c.Check(logbuf.String(), testutil.Contains, `cannot find user session to notify about pending refresh (some-snap)`)
+
+	// restore the server so TearDownTest's shutdown is a no-op success
+	s.server = &http.Server{Handler: s}
+}
+
+func (s *clientSuite) TestPendingRefreshNotificationAgentError(c *C) {
+	logbuf, restore := logger.MockLogger()
+	defer restore()
+
+	s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(500)
+		w.Write([]byte(`{"type":"error","result":{"message":"boom"}}`))
+	})
+	err := s.cli.PendingRefreshNotification(context.Background(), &client.PendingSnapRefreshInfo{InstanceName: "some-snap"})
+	c.Check(err, IsNil)
+
+	c.Check(strings.Count(logbuf.String(), `notification of pending refresh (some-snap) failed: boom`), Equals, 2)
 }
