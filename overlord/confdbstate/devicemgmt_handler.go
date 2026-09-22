@@ -72,12 +72,11 @@ func decodeConfdbAction(raw string) (confdbAction, error) {
 	if err != nil {
 		return confdbAction{}, fmt.Errorf("cannot decode message body: %v", err)
 	}
-
 	return body, nil
 }
 
 // validate checks that a confdbAction is well-formed.
-func (a confdbAction) validate() error {
+func (a *confdbAction) validate() error {
 	if a.Account == "" {
 		return fmt.Errorf("account is required")
 	}
@@ -86,13 +85,12 @@ func (a confdbAction) validate() error {
 	if err != nil {
 		return err
 	}
+	if err := confdb.ValidateConstraints(a.Constraints); err != nil {
+		return err
+	}
 
 	switch a.Action {
 	case "get":
-		err := confdb.ValidateConstraints(a.Constraints)
-		if err != nil {
-			return err
-		}
 	case "set":
 		if len(a.Values) == 0 {
 			return fmt.Errorf("body contains no values to write")
@@ -166,6 +164,9 @@ func (h *confdbMessageHandler) Apply(ctx context.Context, st *state.State, msg *
 	if err != nil {
 		return "", err
 	}
+	if err := confdb.ValidateConstraints(action.Constraints); err != nil {
+		return "", fmt.Errorf("cannot apply message: %v", err)
+	}
 
 	schemaName, viewName, err := parseView(action.View)
 	if err != nil {
@@ -182,7 +183,7 @@ func (h *confdbMessageHandler) Apply(ctx context.Context, st *state.State, msg *
 	case "get":
 		chgID, err = confdbstateReadConfdb(ctx, st, view, action.Keys, action.Constraints, confdb.AdminAccess)
 	case "set":
-		chgID, err = confdbstateWriteConfdb(ctx, st, view, action.Values)
+		chgID, err = confdbstateWriteConfdb(ctx, st, view, action.Values, action.Constraints)
 	default:
 		return "", fmt.Errorf("cannot apply message: unknown action %q", action.Action)
 	}

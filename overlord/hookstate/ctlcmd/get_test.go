@@ -1219,7 +1219,10 @@ func (s *confdbSuite) TestConfdbGetWithConstraints(c *C) {
 	c.Assert(err, IsNil)
 	c.Check(string(stdout), Equals, expectedOutput)
 	c.Check(stderr, IsNil)
-	c.Check(gotConstraints, DeepEquals, map[string]any{"field1": "value1", "field2": "value2"})
+	c.Check(gotConstraints, DeepEquals, map[string]any{
+		"field1": "value1",
+		"field2": "value2",
+	})
 }
 
 func (s *confdbSuite) TestConfdbGetWithStrictConstraintsInvalid(c *C) {
@@ -1353,7 +1356,9 @@ func (s *confdbSuite) TestConfdbGetTypedConstraints(c *C) {
 		c.Assert(err, IsNil, cmt)
 		c.Check(string(stdout), Equals, expectedOutput, cmt)
 		c.Check(stderr, IsNil, cmt)
-		c.Check(gotConstraints, DeepEquals, map[string]any{"field1": tc.expected}, cmt)
+		c.Check(gotConstraints, DeepEquals, map[string]any{
+			"field1": tc.expected,
+		}, cmt)
 
 		restore()
 	}

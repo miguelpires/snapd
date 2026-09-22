@@ -836,10 +836,13 @@ func (s *confdbSuite) TestConfdbGetWithConstraints(c *check.C) {
 			c.Check(keys, DeepEquals, []string{"abc"})
 
 			constraintsStr := q.Get("constraints")
-			var gotConstraints map[string]string
+			var gotConstraints map[string]any
 			err := json.Unmarshal([]byte(constraintsStr), &gotConstraints)
 			c.Assert(err, IsNil)
-			c.Check(gotConstraints, DeepEquals, map[string]string{"field1": "value1", "field2": "value2"})
+			c.Check(gotConstraints, DeepEquals, map[string]any{
+				"field1": "value1",
+				"field2": "value2",
+			})
 
 			w.WriteHeader(202)
 			fmt.Fprintf(w, asyncResp)
