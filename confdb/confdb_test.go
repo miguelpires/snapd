@@ -238,7 +238,7 @@ func (s *viewSuite) TestMissingRequestDefaultsToStorage(c *C) {
 	view := db.View("foo")
 	c.Assert(view, NotNil)
 
-	err = view.Set(databag, "a.b", "value")
+	err = view.Set(databag, "a.b", "value", nil)
 	c.Assert(err, IsNil)
 
 	value, err := view.Get(databag, "", nil, confdb.AdminAccess)
@@ -332,7 +332,7 @@ func (*viewSuite) TestGetAndSetViews(c *C) {
 	view := schema.View("wifi-setup")
 
 	// nested string value
-	err = view.Set(databag, "ssid", "my-ssid")
+	err = view.Set(databag, "ssid", "my-ssid", nil)
 	c.Assert(err, IsNil)
 
 	ssid, err := view.Get(databag, "ssid", nil, confdb.AdminAccess)
@@ -340,7 +340,7 @@ func (*viewSuite) TestGetAndSetViews(c *C) {
 	c.Check(ssid, DeepEquals, "my-ssid")
 
 	// nested list value
-	err = view.Set(databag, "ssids", []string{"one", "two"})
+	err = view.Set(databag, "ssids", []string{"one", "two"}, nil)
 	c.Assert(err, IsNil)
 
 	ssids, err := view.Get(databag, "ssids", nil, confdb.AdminAccess)
@@ -348,7 +348,7 @@ func (*viewSuite) TestGetAndSetViews(c *C) {
 	c.Check(ssids, DeepEquals, []any{"one", "two"})
 
 	// top-level string
-	err = view.Set(databag, "top-level", "randomValue")
+	err = view.Set(databag, "top-level", "randomValue", nil)
 	c.Assert(err, IsNil)
 
 	topLevel, err := view.Get(databag, "top-level", nil, confdb.AdminAccess)
@@ -356,7 +356,7 @@ func (*viewSuite) TestGetAndSetViews(c *C) {
 	c.Check(topLevel, DeepEquals, "randomValue")
 
 	// dotted request paths are permitted
-	err = view.Set(databag, "dotted.path", 3)
+	err = view.Set(databag, "dotted.path", 3, nil)
 	c.Assert(err, IsNil)
 
 	num, err := view.Get(databag, "dotted.path", nil, confdb.AdminAccess)
@@ -377,10 +377,10 @@ func (*viewSuite) TestSetWithNilValueFail(c *C) {
 
 	view := schema.View("test")
 
-	err = view.Set(databag, "foo", "value")
+	err = view.Set(databag, "foo", "value", nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(databag, "foo", nil)
+	err = view.Set(databag, "foo", nil, nil)
 	c.Assert(err, ErrorMatches, `internal error: Set value cannot be nil`)
 
 	ssid, err := view.Get(databag, "foo", nil, confdb.AdminAccess)
@@ -407,7 +407,7 @@ func (s *viewSuite) TestConfdbNotFoundErrors(c *C) {
 	c.Assert(err, testutil.ErrorIs, &confdb.NoMatchError{})
 	c.Assert(err, ErrorMatches, `cannot get "missing" through acc/foo/bar: no matching rule`)
 
-	err = view.Set(databag, "missing", "thing")
+	err = view.Set(databag, "missing", "thing", nil)
 	c.Assert(err, testutil.ErrorIs, &confdb.NoMatchError{})
 	c.Assert(err, ErrorMatches, `cannot set "missing" through acc/foo/bar: no matching rule`)
 
@@ -423,7 +423,7 @@ func (s *viewSuite) TestConfdbNotFoundErrors(c *C) {
 	c.Assert(err, testutil.ErrorIs, &confdb.NoDataError{})
 	c.Assert(err, ErrorMatches, `cannot get acc/foo/bar: no data`)
 
-	err = view.Set(databag, "nested", "thing")
+	err = view.Set(databag, "nested", "thing", nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(databag, "nested", nil)
@@ -472,7 +472,7 @@ func (s *viewSuite) TestViewBadRead(c *C) {
 	c.Assert(err, IsNil)
 
 	view := schema.View("bar")
-	err = view.Set(databag, "one", "foo")
+	err = view.Set(databag, "one", "foo", nil)
 	c.Assert(err, IsNil)
 
 	_, err = view.Get(databag, "onetwo", nil, confdb.AdminAccess)
@@ -516,7 +516,7 @@ func (s *viewSuite) TestViewAccessControl(c *C) {
 
 		view := schema.View("foo")
 
-		err = view.Set(databag, "foo", "thing")
+		err = view.Set(databag, "foo", "thing", nil)
 		if t.setErr != "" {
 			c.Assert(err.Error(), Equals, t.setErr, cmt)
 		} else {
@@ -966,7 +966,7 @@ func (s *viewSuite) TestViewAssertionWithPlaceholder(c *C) {
 		view := schema.View("foo")
 
 		databag := newWitnessDatabag(confdb.NewJSONDatabag())
-		err = view.Set(databag, t.request, "expectedValue")
+		err = view.Set(databag, t.request, "expectedValue", nil)
 		c.Assert(err, IsNil, cmt)
 
 		value, err := view.Get(databag, t.request, nil, confdb.AdminAccess)
@@ -1096,10 +1096,10 @@ func (s *viewSuite) TestViewUnsetTopLevelEntry(c *C) {
 	c.Assert(err, IsNil)
 
 	view := schema.View("my-view")
-	err = view.Set(databag, "foo", "fval")
+	err = view.Set(databag, "foo", "fval", nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(databag, "bar", "bval")
+	err = view.Set(databag, "bar", "bval", nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(databag, "foo", nil)
@@ -1126,10 +1126,10 @@ func (s *viewSuite) TestViewUnsetLeafWithSiblings(c *C) {
 	c.Assert(err, IsNil)
 
 	view := schema.View("my-view")
-	err = view.Set(databag, "bar", "barVal")
+	err = view.Set(databag, "bar", "barVal", nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(databag, "baz", "bazVal")
+	err = view.Set(databag, "baz", "bazVal", nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(databag, "bar", nil)
@@ -1157,7 +1157,7 @@ func (s *viewSuite) TestViewUnsetWithNestedEntry(c *C) {
 	c.Assert(err, IsNil)
 
 	view := schema.View("my-view")
-	err = view.Set(databag, "bar", "barVal")
+	err = view.Set(databag, "bar", "barVal", nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(databag, "foo", nil)
@@ -1187,7 +1187,7 @@ func (s *viewSuite) TestViewUnsetLeafDoesntLeaveEmptyParentMap(c *C) {
 	view := schema.View("my-view")
 
 	// check we leave an empty map
-	err = view.Set(databag, "foo.bar", "val")
+	err = view.Set(databag, "foo.bar", "val", nil)
 	c.Assert(err, IsNil)
 
 	value, err := view.Get(databag, "foo", nil, confdb.AdminAccess)
@@ -1201,7 +1201,7 @@ func (s *viewSuite) TestViewUnsetLeafDoesntLeaveEmptyParentMap(c *C) {
 	c.Assert(err, testutil.ErrorIs, &confdb.NoDataError{})
 	c.Assert(value, IsNil)
 
-	err = view.Set(databag, "a", map[string]any{"c": "d"})
+	err = view.Set(databag, "a", map[string]any{"c": "d"}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(databag, "a.c", nil)
@@ -1226,7 +1226,7 @@ func (s *viewSuite) TestViewUnsetLeafDoesntLeaveEmptyParentList(c *C) {
 	bag := confdb.NewJSONDatabag()
 	view := schema.View("foo")
 
-	err = view.Set(bag, "b", []any{map[string]any{"c": "d"}, map[string]any{"c": "e"}})
+	err = view.Set(bag, "b", []any{map[string]any{"c": "d"}, map[string]any{"c": "e"}}, nil)
 	c.Assert(err, IsNil)
 
 	// removing the map entry "c" removes the parent map and list as well
@@ -1346,7 +1346,7 @@ func (s *viewSuite) TestViewGetMatchesOnPrefix(c *C) {
 	err = view.Set(databag, "snaps", map[string]map[string]any{
 		"snapd":   {"status": "active", "version": "1.0"},
 		"firefox": {"status": "inactive", "version": "9.0"},
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	value, err := view.Get(databag, "snapd.status", nil, confdb.AdminAccess)
@@ -1404,7 +1404,7 @@ func (s *viewSuite) TestViewGetNoMatchRequestLongerThanPattern(c *C) {
 	view := db.View("statuses")
 	err = view.Set(databag, "snapd", map[string]any{
 		"status": "active", "version": "1.0",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	_, err = view.Get(databag, "snapd.status", nil, confdb.AdminAccess)
@@ -1424,10 +1424,10 @@ func (s *viewSuite) TestViewManyPrefixMatches(c *C) {
 	c.Assert(err, IsNil)
 
 	view := schema.View("statuses")
-	err = view.Set(databag, "status.firefox", "active")
+	err = view.Set(databag, "status.firefox", "active", nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(databag, "status.snapd", "disabled")
+	err = view.Set(databag, "status.snapd", "disabled", nil)
 	c.Assert(err, IsNil)
 
 	value, err := view.Get(databag, "status", nil, confdb.AdminAccess)
@@ -1815,7 +1815,7 @@ func (s *viewSuite) TestBadRequestPaths(c *C) {
 
 	for _, tc := range tcs {
 		cmt := Commentf("test %q failed", tc.request)
-		err = view.Set(databag, tc.request, "value")
+		err = view.Set(databag, tc.request, "value", nil)
 		c.Assert(err, NotNil, cmt)
 		c.Assert(err.Error(), Equals, fmt.Sprintf(`cannot set %q through confdb view acc/confdb/foo: %s`, tc.request, tc.errMsg), cmt)
 
@@ -1829,7 +1829,7 @@ func (s *viewSuite) TestBadRequestPaths(c *C) {
 	}
 
 	cmt := Commentf("last test case failed")
-	err = view.Set(databag, "", "value")
+	err = view.Set(databag, "", "value", nil)
 	c.Assert(err, NotNil, cmt)
 	c.Assert(err.Error(), Equals, `cannot set empty path through confdb view acc/confdb/foo`, cmt)
 	c.Assert(err, testutil.ErrorIs, &confdb.BadRequestError{}, cmt)
@@ -1858,7 +1858,7 @@ func (s *viewSuite) TestSetAllowedOnSameRequestButDifferentPaths(c *C) {
 	view := schema.View("foo")
 	c.Assert(view, NotNil)
 
-	err = view.Set(databag, "a.b.c", "value")
+	err = view.Set(databag, "a.b.c", "value", nil)
 	c.Assert(err, IsNil)
 
 	stored, err := databag.Get(parsePath(c, "old"), nil)
@@ -1888,7 +1888,7 @@ func (s *viewSuite) TestSetWritesToMoreNestedLast(c *C) {
 
 	err = view.Set(databag, "snaps.snapd", map[string]any{
 		"name": "snapd",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	val, err := databag.Get(parsePath(c, "snaps"), nil)
@@ -1928,7 +1928,7 @@ func (s *viewSuite) TestReadWriteRead(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(data, DeepEquals, initData)
 
-	err = view.Set(databag, "a", data)
+	err = view.Set(databag, "a", data, nil)
 	c.Assert(err, IsNil)
 
 	data, err = view.Get(databag, "a", nil, confdb.AdminAccess)
@@ -1963,7 +1963,7 @@ func (s *viewSuite) TestReadWriteSameDataAtDifferentLevels(c *C) {
 		val, err := view.Get(databag, req, nil, confdb.AdminAccess)
 		c.Assert(err, IsNil)
 
-		err = view.Set(databag, req, val)
+		err = view.Set(databag, req, val, nil)
 		c.Assert(err, IsNil)
 	}
 
@@ -1997,10 +1997,10 @@ func (s *viewSuite) TestSetValueMissingNestedLevels(c *C) {
 			err := view.Set(databag, req, map[string]any{
 				"foo": "abc",
 				"bar": "xyz",
-			})
+			}, nil)
 			c.Assert(err, IsNil, cmt)
 		}
-		err = view.Set(databag, "b", []any{"a"})
+		err = view.Set(databag, "b", []any{"a"}, nil)
 		c.Assert(err, IsNil, cmt)
 	}
 
@@ -2071,7 +2071,7 @@ func (s *viewSuite) TestSetValueMissingNestedLevels(c *C) {
 		cmt := Commentf("testcase %d/%d", i+1, len(tcs))
 		resetData(cmt)
 
-		err = view.Set(databag, tc.request, tc.value)
+		err = view.Set(databag, tc.request, tc.value, nil)
 		if tc.err != "" {
 			c.Assert(err, ErrorMatches, tc.err, cmt)
 			continue
@@ -2156,7 +2156,7 @@ func (s *viewSuite) TestSetValidateError(c *C) {
 	view := schema.View("foo")
 	c.Assert(view, NotNil)
 
-	err = view.Set(databag, "bar", "baz")
+	err = view.Set(databag, "bar", "baz", nil)
 	c.Assert(err, ErrorMatches, "cannot write data: expected error")
 }
 
@@ -2175,10 +2175,10 @@ func (s *viewSuite) TestSetOverwriteValueWithNewLevel(c *C) {
 	// Note: this shouldn't be possible if the rules haven't changed but let's be
 	// robust in case a confdb-schema is evolved to add nested values to previous paths
 	bag := confdb.NewJSONDatabag()
-	err = view.Set(bag, "a", "foo")
+	err = view.Set(bag, "a", "foo", nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(bag, "c", []any{"bar"})
+	err = view.Set(bag, "c", []any{"bar"}, nil)
 	c.Assert(err, IsNil)
 
 	// we publish a new schema adding some nesting to our rules
@@ -2194,10 +2194,10 @@ func (s *viewSuite) TestSetOverwriteValueWithNewLevel(c *C) {
 	view = schema.View("foo")
 
 	// we can overwrite existing scalar values with nested maps and lists
-	err = view.Set(bag, "a.b", "foo")
+	err = view.Set(bag, "a.b", "foo", nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(bag, "c[0][0]", "bar")
+	err = view.Set(bag, "c[0][0]", "bar", nil)
 	c.Assert(err, IsNil)
 
 	data, err := view.Get(bag, "", nil, confdb.AdminAccess)
@@ -2248,10 +2248,10 @@ func (s *viewSuite) TestSetValidatesDataWithSchemaPass(c *C) {
 	view := confdbSchema.View("foo")
 	c.Assert(view, NotNil)
 
-	err = view.Set(databag, "foo", map[string]int{"a": 1, "b": 2})
+	err = view.Set(databag, "foo", map[string]int{"a": 1, "b": 2}, nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(databag, "bar", []string{"one", "two"})
+	err = view.Set(databag, "bar", []string{"one", "two"}, nil)
 	c.Assert(err, IsNil)
 }
 
@@ -2346,11 +2346,11 @@ func (s *viewSuite) TestSetPreCheckValueAllowsIntNumberMismatch(c *C) {
 	view := confdbSchema.View("foo")
 	c.Assert(view, NotNil)
 
-	err = view.Set(databag, "foo", 1)
+	err = view.Set(databag, "foo", 1, nil)
 	c.Assert(err, IsNil)
 
 	// the schema still checks the data at the end, so setting int schema to a float fails
-	err = view.Set(databag, "foo", 1.1)
+	err = view.Set(databag, "foo", 1.1, nil)
 	c.Assert(err, ErrorMatches, `.*cannot accept element in "foo": expected int type but value was number 1.1`)
 }
 
@@ -2507,7 +2507,7 @@ func (*viewSuite) TestSchemaMismatchCheckMultipleAlternativeTypesHappy(c *C) {
 	view := confdbSchema.View("foo")
 	c.Assert(view, NotNil)
 
-	err = view.Set(databag, "foo", true)
+	err = view.Set(databag, "foo", true, nil)
 	c.Assert(err, IsNil)
 }
 
@@ -2528,7 +2528,7 @@ func (s *viewSuite) TestSetUnmatchedPlaceholderLeaf(c *C) {
 	err = view.Set(databag, "foo", map[string]any{
 		"bar": "value",
 		"baz": "other",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	data, err := view.Get(databag, "foo", nil, confdb.AdminAccess)
@@ -2556,7 +2556,7 @@ func (s *viewSuite) TestSetUnmatchedPlaceholderMidPath(c *C) {
 	err = view.Set(databag, "foo", map[string]any{
 		"bar": map[string]any{"nested": "value"},
 		"baz": map[string]any{"nested": "other"},
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	data, err := view.Get(databag, "foo", nil, confdb.AdminAccess)
@@ -2590,7 +2590,7 @@ func (s *viewSuite) TestSetManyUnmatchedPlaceholders(c *C) {
 			"e": "value",
 			"f": "other",
 		}},
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	data, err := view.Get(databag, "foo", nil, confdb.AdminAccess)
@@ -2624,7 +2624,7 @@ func (s *viewSuite) TestUnsetUnmatchedPlaceholderLast(c *C) {
 	err = view.Set(databag, "foo", map[string]any{
 		"bar": "value",
 		"baz": "other",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(databag, "foo", nil)
@@ -2652,7 +2652,7 @@ func (s *viewSuite) TestUnsetTopLevelUnmatchedPlaceholderLast(c *C) {
 	err = view.Set(databag, "foo", map[string]any{
 		"bar": "value",
 		"baz": "other",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(databag, "foo", nil)
@@ -2692,7 +2692,7 @@ func (s *viewSuite) TestUnsetUnmatchedPlaceholderMid(c *C) {
 		"c": map[string]any{
 			"two": "value",
 		},
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(databag, "one", nil)
@@ -2876,7 +2876,7 @@ func (s *viewSuite) TestViewSetErrorIfValueContainsUnusedParts(c *C) {
 		view := schema.View("foo")
 		c.Assert(view, NotNil)
 
-		err = view.Set(databag, tc.request, tc.value)
+		err = view.Set(databag, tc.request, tc.value, nil)
 		if tc.err != "" {
 			c.Check(err.Error(), Equals, tc.err, cmt)
 		} else {
@@ -2902,7 +2902,7 @@ func (s *viewSuite) TestSetPathChecksValueCoveredByMultipleBranches(c *C) {
 	err = view.Set(bag, "foo", map[string]any{
 		"bar":   map[string]any{"baz": "value"},
 		"other": "value",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 }
 
@@ -2958,13 +2958,13 @@ func (s *viewSuite) TestGetEntireView(c *C) {
 	err = view.Set(databag, "foo", map[string]any{
 		"bar": "value",
 		"baz": "other",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(databag, "abc", "cba")
+	err = view.Set(databag, "abc", "cba", nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(databag, "write-only", "value")
+	err = view.Set(databag, "write-only", "value", nil)
 	c.Assert(err, IsNil)
 
 	result, err := view.Get(databag, "", nil, confdb.AdminAccess)
@@ -3009,7 +3009,7 @@ func (*viewSuite) TestViewContentRule(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(val, Equals, "value")
 
-	err = view.Set(databag, "a.b", "other")
+	err = view.Set(databag, "a.b", "other", nil)
 	c.Assert(err, IsNil)
 
 	val, err = view.Get(databag, "a.b", nil, confdb.AdminAccess)
@@ -3060,7 +3060,7 @@ func (*viewSuite) TestContentInheritsAccess(c *C) {
 		c.Assert(err, IsNil)
 
 		view := schema.View("foo")
-		err = view.Set(databag, "foo.bar", "thing")
+		err = view.Set(databag, "foo.bar", "thing", nil)
 		if t.setErr != "" {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, t.setErr, cmt)
@@ -3104,7 +3104,7 @@ func (*viewSuite) TestInheritedAccessInSeveralNestedContents(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(val, Equals, "abc")
 
-	err = view.Set(databag, "foo.bar.baz", "abc")
+	err = view.Set(databag, "foo.bar.baz", "abc", nil)
 	c.Assert(err, ErrorMatches, `cannot set "foo.bar.baz" through acc/confdb/foo: no matching rule`)
 }
 
@@ -3197,7 +3197,7 @@ func (*viewSuite) TestViewSeveralNestedContentRules(c *C) {
 
 	databag := confdb.NewJSONDatabag()
 	view := schema.View("bar")
-	err = view.Set(databag, "a.b.c.d", "value")
+	err = view.Set(databag, "a.b.c.d", "value", nil)
 	c.Assert(err, IsNil)
 
 	val, err := view.Get(databag, "a.b.c.d", nil, confdb.AdminAccess)
@@ -3299,7 +3299,7 @@ func (*viewSuite) TestSetValidateValue(c *C) {
 
 	for _, tc := range tcs {
 		cmt := Commentf("expected invalid key err for value: %v", tc.value)
-		err = view.Set(databag, "foo", tc.value)
+		err = view.Set(databag, "foo", tc.value, nil)
 		if tc.error != "" {
 			c.Assert(err, NotNil, cmt)
 			c.Assert(err.Error(), Equals, tc.error, cmt)
@@ -3328,13 +3328,13 @@ func (s *viewSuite) TestSetUsingMapWithNilValuesAtLeaves(c *C) {
 	err = view.Set(databag, "foo", map[string]any{
 		"a": "value",
 		"b": "other",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Set(databag, "foo", map[string]any{
 		"a": nil,
 		"b": nil,
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	// the leaves are removed and the empty container left behind is removed
@@ -3365,7 +3365,7 @@ func (s *viewSuite) TestSetWithMultiplePathsNestedAtLeaves(c *C) {
 			"d": "other",
 		},
 		"b": "other",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Set(databag, "foo", map[string]any{
@@ -3373,7 +3373,7 @@ func (s *viewSuite) TestSetWithMultiplePathsNestedAtLeaves(c *C) {
 			"d": nil,
 		},
 		"b": nil,
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	// a is emptied by the write and both it and the now empty foo are removed
@@ -3400,13 +3400,13 @@ func (s *viewSuite) TestSetWithNilAndNonNilLeaves(c *C) {
 	err = view.Set(databag, "foo", map[string]any{
 		"a": "value",
 		"b": "other",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Set(databag, "foo", map[string]any{
 		"a": nil,
 		"c": "value",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	value, err := view.Get(databag, "foo", nil, confdb.AdminAccess)
@@ -3438,14 +3438,14 @@ func (*viewSuite) TestSetEnforcesNestednessLimit(c *C) {
 
 	err = view.Set(databag, "foo", map[string]any{
 		"bar": "baz",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Set(databag, "foo", map[string]any{
 		"bar": map[string]any{
 			"baz": "value",
 		},
-	})
+	}, nil)
 	c.Assert(err, ErrorMatches, `cannot set "foo" through confdb view acc/foo/bar: value cannot have more than 2 nested levels`)
 }
 
@@ -3940,7 +3940,7 @@ func (*viewSuite) TestDetectViewRulesExpectDifferentTypes(c *C) {
 	bag := confdb.NewJSONDatabag()
 	view := schema.View("foo")
 
-	err = view.Set(bag, "a.b", "bar")
+	err = view.Set(bag, "a.b", "bar", nil)
 	c.Assert(err, IsNil)
 
 	// check that both Get and Set handle a path/container mismatch gracefully if
@@ -3948,7 +3948,7 @@ func (*viewSuite) TestDetectViewRulesExpectDifferentTypes(c *C) {
 	_, err = view.Get(bag, "a[0]", nil, confdb.AdminAccess)
 	c.Assert(err, ErrorMatches, `cannot use "\[0\]" to access map at path "a"`)
 
-	err = view.Set(bag, "a[0]", "foo")
+	err = view.Set(bag, "a[0]", "foo", nil)
 	c.Assert(err, ErrorMatches, `cannot use "\[0\]" to access map at path "a"`)
 
 	err = view.Unset(bag, "a[0]", nil)
@@ -3965,7 +3965,7 @@ func (*viewSuite) TestDetectViewRulesExpectDifferentTypes(c *C) {
 	_, err = view.Get(bag, "a.b", nil, confdb.AdminAccess)
 	c.Assert(err, ErrorMatches, `cannot use "b" to index list at path "a"`)
 
-	err = view.Set(bag, "a.b", "foo")
+	err = view.Set(bag, "a.b", "foo", nil)
 	c.Assert(err, ErrorMatches, `cannot use "b" to index list at path "a"`)
 
 	err = view.Unset(bag, "a.b", nil)
@@ -3984,7 +3984,7 @@ func (*viewSuite) TestSetListSetsOrAppends(c *C) {
 
 	bag := confdb.NewJSONDatabag()
 	view := schema.View("foo")
-	err = view.Set(bag, "a[0]", "foo")
+	err = view.Set(bag, "a[0]", "foo", nil)
 	c.Assert(err, IsNil)
 
 	val, err := view.Get(bag, "a[0]", nil, confdb.AdminAccess)
@@ -3992,21 +3992,21 @@ func (*viewSuite) TestSetListSetsOrAppends(c *C) {
 	c.Assert(val, DeepEquals, "foo")
 
 	// can overwrite
-	err = view.Set(bag, "a[0]", "bar")
+	err = view.Set(bag, "a[0]", "bar", nil)
 	c.Assert(err, IsNil)
 	val, err = view.Get(bag, "a[0]", nil, confdb.AdminAccess)
 	c.Assert(err, IsNil)
 	c.Assert(val, DeepEquals, "bar")
 
 	// can append
-	err = view.Set(bag, "a[1]", "baz")
+	err = view.Set(bag, "a[1]", "baz", nil)
 	c.Assert(err, IsNil)
 	val, err = view.Get(bag, "a[1]", nil, confdb.AdminAccess)
 	c.Assert(err, IsNil)
 	c.Assert(val, DeepEquals, "baz")
 
 	// cannot append if index is not next one
-	err = view.Set(bag, "a[9]", "foo")
+	err = view.Set(bag, "a[9]", "foo", nil)
 	c.Assert(err, ErrorMatches, `cannot access "a\[9\]": list has length 2`)
 }
 
@@ -4025,11 +4025,11 @@ func (*viewSuite) TestSetListNested(c *C) {
 	view := schema.View("foo")
 
 	// set nested list
-	err = view.Set(bag, "a[0][0]", "foo")
+	err = view.Set(bag, "a[0][0]", "foo", nil)
 	c.Assert(err, IsNil)
 
 	// append in nested list
-	err = view.Set(bag, "a[0][1]", "bar")
+	err = view.Set(bag, "a[0][1]", "bar", nil)
 	c.Assert(err, IsNil)
 
 	val, err := view.Get(bag, "a", nil, confdb.AdminAccess)
@@ -4051,14 +4051,14 @@ func (*viewSuite) TestSetListPlaceholder(c *C) {
 	view := schema.View("foo")
 
 	// can set entire list
-	err = view.Set(bag, "a", []any{"foo"})
+	err = view.Set(bag, "a", []any{"foo"}, nil)
 	c.Assert(err, IsNil)
 
 	val, err := view.Get(bag, "a[0]", nil, confdb.AdminAccess)
 	c.Assert(err, IsNil)
 	c.Assert(val, DeepEquals, "foo")
 
-	err = view.Set(bag, "a[0]", "bar")
+	err = view.Set(bag, "a[0]", "bar", nil)
 	c.Assert(err, IsNil)
 
 	val, err = view.Get(bag, "a[0]", nil, confdb.AdminAccess)
@@ -4069,7 +4069,7 @@ func (*viewSuite) TestSetListPlaceholder(c *C) {
 	err = bag.Unset(parsePath(c, "a"))
 	c.Assert(err, IsNil)
 
-	err = view.Set(bag, "a", []any{"foo", "bar"})
+	err = view.Set(bag, "a", []any{"foo", "bar"}, nil)
 	c.Assert(err, IsNil)
 
 	val, err = view.Get(bag, "a", nil, confdb.AdminAccess)
@@ -4077,14 +4077,14 @@ func (*viewSuite) TestSetListPlaceholder(c *C) {
 	c.Assert(val, DeepEquals, []any{"foo", "bar"})
 
 	// can overwrite list element with nested value
-	err = view.Set(bag, "a[0]", map[string]any{"a": "b"})
+	err = view.Set(bag, "a[0]", map[string]any{"a": "b"}, nil)
 	c.Assert(err, IsNil)
 
 	val, err = view.Get(bag, "a[0]", nil, confdb.AdminAccess)
 	c.Assert(err, IsNil)
 	c.Assert(val, DeepEquals, map[string]any{"a": "b"})
 
-	err = view.Set(bag, "a[1]", map[string]any{"c": "d"})
+	err = view.Set(bag, "a[1]", map[string]any{"c": "d"}, nil)
 	c.Assert(err, IsNil)
 
 	val, err = view.Get(bag, "a", nil, confdb.AdminAccess)
@@ -4117,7 +4117,7 @@ func (*viewSuite) TestSetPartialSetRemovesFirstItem(c *C) {
 
 	// this tests that the missing age field doesn't cause the entire list item
 	// to be removed prematurely, as that would shift the following writes
-	err = view.Set(bag, "users", []any{map[string]any{"name": "carol"}, map[string]any{"name": "david", "age": 45}})
+	err = view.Set(bag, "users", []any{map[string]any{"name": "carol"}, map[string]any{"name": "david", "age": 45}}, nil)
 	c.Assert(err, IsNil)
 
 	val, err := view.Get(bag, "users", nil, confdb.AdminAccess)
@@ -4152,7 +4152,7 @@ func (*viewSuite) TestSplitListCase(c *C) {
 	err = view.Set(bag, "users", []any{
 		map[string]any{"age": 31},
 		map[string]any{"age": 41, "name": "david"},
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	ages, err := bag.Get(parsePath(c, "ages"), nil)
@@ -4186,10 +4186,10 @@ func (*viewSuite) TestListMerge(c *C) {
 	bag := confdb.NewJSONDatabag()
 	view := schema.View("foo")
 
-	err = view.Set(bag, "a", []any{"foo", "bar"})
+	err = view.Set(bag, "a", []any{"foo", "bar"}, nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(bag, "a[2]", "baz")
+	err = view.Set(bag, "a[2]", "baz", nil)
 	c.Assert(err, IsNil)
 
 	res, err := view.Get(bag, "a", nil, confdb.AdminAccess)
@@ -4211,7 +4211,7 @@ func (*viewSuite) TestUnsetList(c *C) {
 	bag := confdb.NewJSONDatabag()
 	view := schema.View("foo")
 
-	err = view.Set(bag, "a", []any{"foo", "bar", "baz"})
+	err = view.Set(bag, "a", []any{"foo", "bar", "baz"}, nil)
 	c.Assert(err, IsNil)
 
 	// unset middle element
@@ -4231,7 +4231,7 @@ func (*viewSuite) TestUnsetList(c *C) {
 	c.Assert(val, IsNil)
 
 	// check matching on a prefix unsets every list element
-	err = view.Set(bag, "b", []any{map[string]any{"c": "foo"}, map[string]any{"c": "bar"}})
+	err = view.Set(bag, "b", []any{map[string]any{"c": "foo"}, map[string]any{"c": "bar"}}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(bag, "b", nil)
@@ -4256,7 +4256,7 @@ func (*viewSuite) TestUnsetBeyondCurrentList(c *C) {
 	view := schema.View("foo")
 
 	for _, pref := range []string{"a", "c"} {
-		err = view.Set(bag, pref, []any{map[string]any{"b": "foo"}, map[string]any{"b": "bar"}})
+		err = view.Set(bag, pref, []any{map[string]any{"b": "foo"}, map[string]any{"b": "bar"}}, nil)
 		c.Assert(err, IsNil)
 
 		err = view.Unset(bag, pref+"[2]", nil)
@@ -4282,10 +4282,10 @@ func (*viewSuite) TestPartialUnsetNestedInList(c *C) {
 	bag := confdb.NewJSONDatabag()
 	view := schema.View("foo")
 
-	err = view.Set(bag, "a", []any{map[string]any{"a": "foo"}, map[string]any{"a": "foo"}})
+	err = view.Set(bag, "a", []any{map[string]any{"a": "foo"}, map[string]any{"a": "foo"}}, nil)
 	c.Assert(err, IsNil)
 
-	err = view.Set(bag, "b", []any{map[string]any{"b": "bar"}, map[string]any{"b": "bar"}})
+	err = view.Set(bag, "b", []any{map[string]any{"b": "bar"}, map[string]any{"b": "bar"}}, nil)
 	c.Assert(err, IsNil)
 
 	err = view.Unset(bag, "a", nil)
@@ -4311,7 +4311,7 @@ func (*viewSuite) TestUnsetNestedList(c *C) {
 	bag := confdb.NewJSONDatabag()
 	view := schema.View("foo")
 
-	err = view.Set(bag, "a", []any{[]any{"foo", "bar", "baz"}, []any{"a", "b"}})
+	err = view.Set(bag, "a", []any{[]any{"foo", "bar", "baz"}, []any{"a", "b"}}, nil)
 	c.Assert(err, IsNil)
 
 	// unset from 1st list
@@ -5415,7 +5415,7 @@ func (*viewSuite) TestFilteringNoData(c *C) {
 	err = view.Set(bag, "foo", map[string]any{
 		"bar": "a",
 		"baz": "b",
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	// pruning top level map
@@ -5423,7 +5423,7 @@ func (*viewSuite) TestFilteringNoData(c *C) {
 	c.Assert(val, IsNil)
 	c.Assert(err, testutil.ErrorIs, &confdb.NoDataError{})
 
-	err = view.Set(bag, "a", map[string]any{"b": map[string]any{"c": map[string]any{"d": "value"}}})
+	err = view.Set(bag, "a", map[string]any{"b": map[string]any{"c": map[string]any{"d": "value"}}}, nil)
 	c.Assert(err, IsNil)
 
 	// pruning several nested levels down
@@ -5452,7 +5452,7 @@ func (*viewSuite) TestFieldFilteringNestedUnderList(c *C) {
 	err = view.Set(bag, "foo", []any{
 		map[string]any{"baz": "a"},
 		map[string]any{"baz": "b"},
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	val, err := view.Get(bag, "foo", map[string]any{"field": "a"}, confdb.AdminAccess)
@@ -5536,7 +5536,7 @@ func (*viewSuite) TestSetListIndexesInNumericOrder(c *C) {
 	// has 11 elements so we test that settings[10] sorts after settings[9]
 	// (i.e., they're not lexicographically sorted)
 	value := []any{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"}
-	err = view.Set(bag, "settings", value)
+	err = view.Set(bag, "settings", value, nil)
 	c.Assert(err, IsNil)
 }
 
@@ -5555,7 +5555,7 @@ func (*viewSuite) TestFieldFilteringNotString(c *C) {
 
 	bag := confdb.NewJSONDatabag()
 	view := schema.View("foo")
-	err = view.Set(bag, "foo.bar", true)
+	err = view.Set(bag, "foo.bar", true, nil)
 	c.Assert(err, IsNil)
 
 	// can't unmarshal the boolean as string so considered as not matching
@@ -6245,6 +6245,423 @@ func FuzzParsePathIntoAccessorsAllowPlaceholdersForbidIndexes(f *testing.F) {
 	fuzzHelper(f, o, "foo[.status={status}].{bar}.baz.foo[{n}][{m}]")
 }
 
+func (s *viewSuite) TestConstrainedWriteMapFields(c *C) {
+	views := map[string]any{
+		"test": map[string]any{
+			"parameters": map[string]any{"kind": map[string]any{}},
+			"rules": []any{
+				map[string]any{"request": "names.{key}", "storage": "items.{key}[.kind={kind}].name"},
+			},
+		},
+	}
+	schema, err := confdb.NewSchema("acc", "test", views, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	view := schema.View("test")
+
+	bag := newWitnessDatabag(confdb.NewJSONDatabag())
+	c.Assert(bag.Set(parsePath(c, "items"), map[string]any{
+		"a": map[string]any{"kind": "managed", "name": "old-a", "other": "preserve"},
+		"b": map[string]any{"kind": "managed", "name": "old-b"},
+		"c": map[string]any{"kind": "manual", "name": "keep"},
+	}), IsNil)
+
+	value := map[string]any{"a": "new"}
+	constraints := map[string]any{"kind": "managed"}
+	err = view.Set(bag, "names", value, constraints)
+	c.Assert(err, IsNil)
+	c.Check(bag.unsetPaths, HasLen, 0)
+
+	stored, err := bag.Get(parsePath(c, "items"), nil)
+	c.Assert(err, IsNil)
+	c.Check(stored, DeepEquals, map[string]any{
+		"a": map[string]any{"kind": "managed", "name": "new", "other": "preserve"},
+		"b": map[string]any{"kind": "managed", "name": "old-b"},
+		"c": map[string]any{"kind": "manual", "name": "keep"},
+	})
+
+	// nothing is changed because the field can't be applied to the entry at items.a
+	value = map[string]any{"a": "NOMATCH"}
+	constraints = map[string]any{"kind": "manual"}
+	err = view.Set(bag, "names", value, constraints)
+	c.Assert(err, IsNil)
+	c.Check(stored, DeepEquals, map[string]any{
+		"a": map[string]any{"kind": "managed", "name": "new", "other": "preserve"},
+		"b": map[string]any{"kind": "managed", "name": "old-b"},
+		"c": map[string]any{"kind": "manual", "name": "keep"},
+	})
+
+	value = map[string]any{"newkey": "new-name"}
+	constraints = map[string]any{"kind": "managed"}
+	err = view.Set(bag, "names", value, constraints)
+	c.Assert(err, IsNil)
+	stored, err = bag.Get(parsePath(c, "items.newkey"), nil)
+	c.Assert(err, IsNil)
+	c.Check(stored, DeepEquals, map[string]any{"kind": "managed", "name": "new-name"})
+	got, err := view.Get(bag.bag, "names.newkey", constraints, confdb.AdminAccess)
+	c.Assert(err, IsNil)
+	c.Check(got, Equals, "new-name")
+}
+
+func (s *viewSuite) TestConstrainedWriteReplacesWholeEntry(c *C) {
+	views := map[string]any{
+		"test": map[string]any{
+			"parameters": map[string]any{"kind": map[string]any{}},
+			"rules": []any{
+				map[string]any{"request": "items[{n}]", "storage": "items[{n}][.kind={kind}]"},
+			},
+		},
+	}
+	schema, err := confdb.NewSchema("acc", "test", views, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	view := schema.View("test")
+
+	bag := newWitnessDatabag(confdb.NewJSONDatabag())
+	err = bag.Set(parsePath(c, "items"), []any{
+		map[string]any{"kind": "managed", "name": "old"},
+		map[string]any{"kind": "manual", "name": "keep"},
+	})
+	c.Assert(err, IsNil)
+
+	value := []any{map[string]any{"name": "new"}}
+	constraints := map[string]any{"kind": "managed"}
+	err = view.Set(bag, "items", value, constraints)
+	c.Assert(err, IsNil)
+	c.Check(bag.unsetPaths, HasLen, 0)
+
+	stored, err := bag.Get(parsePath(c, "items"), nil)
+	c.Assert(err, IsNil)
+	c.Check(stored, DeepEquals, []any{
+		map[string]any{"kind": "managed", "name": "new"},
+		map[string]any{"kind": "manual", "name": "keep"},
+	})
+
+	got, err := view.Get(bag.bag, "items", constraints, confdb.AdminAccess)
+	c.Assert(err, IsNil)
+	c.Check(got, DeepEquals, []any{map[string]any{"kind": "managed", "name": "new"}})
+
+	value = []any{map[string]any{"kind": "manual", "name": "conflict"}}
+	err = view.Set(bag, "items", value, constraints)
+	c.Assert(err, ErrorMatches, `cannot write field "kind": existing value conflicts with constraint "kind"`)
+	unchanged, err := bag.Get(parsePath(c, "items"), nil)
+	c.Assert(err, IsNil)
+	c.Check(unchanged, DeepEquals, stored)
+}
+
+func (s *viewSuite) TestConstrainedListWriteWholeEntryRoundTrip(c *C) {
+	views := map[string]any{
+		"test": map[string]any{
+			"parameters": map[string]any{"kind": map[string]any{}},
+			"rules": []any{
+				map[string]any{"request": "items[{n}]", "storage": "items[{n}][.kind={kind}]"},
+			},
+		},
+	}
+	schema, err := confdb.NewSchema("acc", "test", views, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	view := schema.View("test")
+	keepA := map[string]any{"kind": "manual", "name": "keep-a"}
+	keepB := map[string]any{"kind": "manual", "name": "keep-b"}
+	old := map[string]any{"kind": "managed", "name": "old"}
+	value := []any{
+		map[string]any{"kind": "managed", "name": "new-a"},
+		map[string]any{"kind": "managed", "name": "new-b"},
+	}
+	constraints := map[string]any{"kind": "managed"}
+	for _, tc := range []struct {
+		name     string
+		existing []any
+		expected []any
+	}{
+		// old items match new ones 1-1
+		{"fill removed slots", []any{keepA, old, keepB, old}, []any{keepA, value[0], keepB, value[1]}},
+		// more new items than old, so appended at the end
+		{"append extra after survivors", []any{keepA, old, keepB}, []any{keepA, value[0], keepB, value[1]}},
+		// less new items than old, so the ones at the end are removed
+		{"remove unused slots", []any{old, keepA, old, old, keepB, old}, []any{value[0], keepA, value[1], keepB}},
+		// no old values match constraint, append only
+		{"append", []any{keepA}, []any{keepA, value[0], value[1]}},
+		// no old values at all
+		{"create", nil, value},
+	} {
+		cmt := Commentf("%s", tc.name)
+		bag := confdb.NewJSONDatabag()
+		if tc.existing != nil {
+			c.Assert(bag.Set(parsePath(c, "items"), tc.existing), IsNil, cmt)
+		}
+		err = view.Set(bag, "items", value, constraints)
+		c.Assert(err, IsNil, cmt)
+		stored, err := bag.Get(parsePath(c, "items"), nil)
+		c.Assert(err, IsNil, cmt)
+		c.Check(stored, DeepEquals, tc.expected, cmt)
+
+		// reading the same path with the same constraints should return what we wrote
+		got, err := view.Get(bag, "items", constraints, confdb.AdminAccess)
+		c.Assert(err, IsNil, cmt)
+		c.Check(got, DeepEquals, value, cmt)
+	}
+}
+
+func (s *viewSuite) TestConstrainedListWriteWholeEntryCreatesNestedList(c *C) {
+	views := map[string]any{
+		"test": map[string]any{
+			"parameters": map[string]any{"kind": map[string]any{}},
+			"rules": []any{
+				map[string]any{"request": "groups[{g}].items[{n}]", "storage": "groups[{g}].items[{n}][.kind={kind}]"},
+			},
+		},
+	}
+	schema, err := confdb.NewSchema("acc", "test", views, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	view := schema.View("test")
+	bag := confdb.NewJSONDatabag()
+	value := []any{map[string]any{"items": []any{map[string]any{"name": "new"}}}}
+
+	err = view.Set(bag, "groups", value, map[string]any{"kind": "managed"})
+	c.Assert(err, IsNil)
+
+	stored, err := bag.Get(parsePath(c, "groups"), nil)
+	c.Assert(err, IsNil)
+	c.Check(stored, DeepEquals, []any{
+		map[string]any{"items": []any{map[string]any{"name": "new", "kind": "managed"}}},
+	})
+}
+
+func (s *viewSuite) TestConstrainedNestedListWrite(c *C) {
+	views := map[string]any{
+		"test": map[string]any{
+			"parameters": map[string]any{"kind": map[string]any{}},
+			"rules": []any{
+				map[string]any{
+					"request": "groups[{g}].items[{n}]",
+					"storage": "groups[{g}][.kind={kind}].items[{n}][.kind={kind}]",
+				},
+			},
+		},
+	}
+	schema, err := confdb.NewSchema("acc", "test", views, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	view := schema.View("test")
+	bag := confdb.NewJSONDatabag()
+
+	err = bag.Set(parsePath(c, "groups"), []any{
+		map[string]any{
+			"kind":  "manual",
+			"items": []any{map[string]any{"kind": "managed", "name": "keep-group"}},
+		},
+		map[string]any{
+			"kind": "managed",
+			"items": []any{
+				map[string]any{"kind": "manual", "name": "keep-item"},
+				map[string]any{"kind": "managed", "name": "old"},
+				map[string]any{"kind": "manual", "name": "keep-item"},
+			},
+		},
+	})
+	c.Assert(err, IsNil)
+
+	// Input indexes 0 and 0 must target the selected stored indexes 3 and 2.
+	value := []any{map[string]any{"items": []any{map[string]any{"name": "new"}}}}
+	err = view.Set(bag, "groups", value, map[string]any{"kind": "managed"})
+	c.Assert(err, IsNil)
+
+	stored, err := bag.Get(parsePath(c, "groups"), nil)
+	c.Assert(err, IsNil)
+	c.Check(stored, DeepEquals, []any{
+		map[string]any{
+			"kind":  "manual",
+			"items": []any{map[string]any{"kind": "managed", "name": "keep-group"}},
+		},
+		map[string]any{
+			"kind": "managed",
+			"items": []any{
+				map[string]any{"kind": "manual", "name": "keep-item"},
+				map[string]any{"kind": "managed", "name": "new"},
+				map[string]any{"kind": "manual", "name": "keep-item"},
+			},
+		},
+	})
+}
+
+func (s *viewSuite) TestConstrainedListWriteFieldOnlyRoundTrip(c *C) {
+	views := map[string]any{
+		"test": map[string]any{
+			"parameters": map[string]any{"kind": map[string]any{}},
+			"rules": []any{
+				map[string]any{"request": "names[{n}]", "storage": "records[{n}][.kind={kind}].name"},
+			},
+		},
+	}
+	schema, err := confdb.NewSchema("acc", "test", views, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	bag := confdb.NewJSONDatabag()
+	keep := map[string]any{"kind": "manual", "name": "keep"}
+	c.Assert(bag.Set(parsePath(c, "records"), []any{
+		keep,
+		map[string]any{"kind": "managed", "name": "old-a", "id": "a"},
+		keep,
+		map[string]any{"kind": "managed", "name": "old-b", "id": "b"},
+	}), IsNil)
+	view := schema.View("test")
+	constraints := map[string]any{"kind": "managed"}
+	value := []any{"new-a", "new-b"}
+	err = view.Set(bag, "names", value, constraints)
+	c.Assert(err, IsNil)
+
+	stored, err := bag.Get(parsePath(c, "records"), nil)
+	c.Assert(err, IsNil)
+	c.Check(stored, DeepEquals, []any{
+		keep,
+		map[string]any{"kind": "managed", "name": "new-a", "id": "a"},
+		keep,
+		map[string]any{"kind": "managed", "name": "new-b", "id": "b"},
+	})
+	got, err := view.Get(bag, "names", constraints, confdb.AdminAccess)
+	c.Assert(err, IsNil)
+	c.Check(got, DeepEquals, value)
+}
+
+func (s *viewSuite) TestConstrainedListWriteFieldOnlyRemovesUnusedFields(c *C) {
+	views := map[string]any{
+		"test": map[string]any{
+			"parameters": map[string]any{"kind": map[string]any{}},
+			"rules": []any{
+				map[string]any{"request": "names[{n}]", "storage": "records[{n}][.kind={kind}].name"},
+			},
+		},
+	}
+	schema, err := confdb.NewSchema("acc", "test", views, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	view := schema.View("test")
+	bag := newWitnessDatabag(confdb.NewJSONDatabag())
+	err = bag.Set(parsePath(c, "records"), []any{
+		map[string]any{"kind": "managed", "name": "old-a", "id": "a"},
+		map[string]any{"kind": "manual", "name": "keep"},
+		map[string]any{"kind": "managed", "name": "old-b", "id": "b"},
+	})
+	c.Assert(err, IsNil)
+
+	constraints := map[string]any{"kind": "managed"}
+	err = view.Set(bag, "names", []any{"new-a"}, constraints)
+	c.Assert(err, IsNil)
+	c.Check(bag.getUnsetPaths(), DeepEquals, []string{"records[2].name"})
+
+	stored, err := bag.Get(parsePath(c, "records"), nil)
+	c.Assert(err, IsNil)
+	c.Check(stored, DeepEquals, []any{
+		map[string]any{"kind": "managed", "name": "new-a", "id": "a"},
+		map[string]any{"kind": "manual", "name": "keep"},
+		map[string]any{"kind": "managed", "id": "b"},
+	})
+}
+
+func (s *viewSuite) TestConstrainedListWriteFieldOnlyCreatesFieldsAndEntries(c *C) {
+	views := map[string]any{
+		"test": map[string]any{
+			"parameters": map[string]any{"kind": map[string]any{}},
+			"rules": []any{
+				map[string]any{"request": "names[{n}]", "storage": "items[{n}][.kind={kind}].name"},
+			},
+		},
+	}
+	schema, err := confdb.NewSchema("acc", "test", views, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	view := schema.View("test")
+
+	for _, tc := range []struct {
+		name     string
+		existing []any
+		value    []any
+		expected []any
+	}{
+		{
+			name: "create missing field",
+			existing: []any{
+				map[string]any{"kind": "manual", "name": "keep"},
+				map[string]any{"kind": "managed", "id": "preserve"},
+			},
+			value: []any{"new"},
+			expected: []any{
+				map[string]any{"kind": "manual", "name": "keep"},
+				map[string]any{"kind": "managed", "id": "preserve", "name": "new"},
+			},
+		},
+		{
+			name: "append excess value",
+			existing: []any{
+				map[string]any{"kind": "managed", "name": "old"},
+				map[string]any{"kind": "manual", "name": "keep"},
+			},
+			value: []any{"new-a", "new-b"},
+			expected: []any{
+				map[string]any{"kind": "managed", "name": "new-a"},
+				map[string]any{"kind": "manual", "name": "keep"},
+				map[string]any{"kind": "managed", "name": "new-b"},
+			},
+		},
+		{
+			name:     "append without matches",
+			existing: []any{map[string]any{"kind": "manual", "name": "keep"}},
+			value:    []any{"new"},
+			expected: []any{
+				map[string]any{"kind": "manual", "name": "keep"},
+				map[string]any{"kind": "managed", "name": "new"},
+			},
+		},
+		{
+			name:     "create missing list",
+			value:    []any{"new"},
+			expected: []any{map[string]any{"kind": "managed", "name": "new"}},
+		},
+	} {
+		cmt := Commentf("%s", tc.name)
+		bag := confdb.NewJSONDatabag()
+		if tc.existing != nil {
+			err = bag.Set(parsePath(c, "items"), tc.existing)
+			c.Assert(err, IsNil, cmt)
+		}
+
+		constraints := map[string]any{"kind": "managed"}
+		err = view.Set(bag, "names", tc.value, constraints)
+		c.Assert(err, IsNil, cmt)
+
+		stored, err := bag.Get(parsePath(c, "items"), nil)
+		c.Assert(err, IsNil, cmt)
+		c.Assert(stored, DeepEquals, tc.expected, cmt)
+
+		got, err := view.Get(bag, "names", constraints, confdb.AdminAccess)
+		c.Assert(err, IsNil, cmt)
+		c.Assert(got, DeepEquals, tc.value, cmt)
+	}
+}
+
+func (s *viewSuite) TestConstrainedWriteExpandsInjectedFields(c *C) {
+	views := map[string]any{
+		"test": map[string]any{
+			"parameters": map[string]any{"kind": map[string]any{}},
+			"rules": []any{
+				map[string]any{"request": "items[{n}]", "storage": "items[{n}][.kind={kind}]"},
+				map[string]any{"request": "items[{n}].kind", "storage": "items[{n}][.kind={kind}].label"},
+			},
+		},
+	}
+	schema, err := confdb.NewSchema("acc", "test", views, confdb.NewJSONSchema())
+	c.Assert(err, IsNil)
+	view := schema.View("test")
+	bag := confdb.NewJSONDatabag()
+	err = bag.Set(parsePath(c, "items"), []any{map[string]any{"kind": "managed", "name": "old", "label": "old"}})
+	c.Assert(err, IsNil)
+
+	// the kind isn't passed as a value, but Set() injects it there given otherwise
+	// the constraint write's value wouldn't match its own constraints
+	value := []any{map[string]any{"name": "new"}}
+	err = view.Set(bag, "items", value, map[string]any{"kind": "managed"})
+	c.Assert(err, IsNil)
+
+	stored, err := bag.Get(parsePath(c, "items"), nil)
+	c.Assert(err, IsNil)
+	c.Check(stored, DeepEquals, []any{map[string]any{"kind": "managed", "name": "new", "label": "managed"}})
+}
+
 func (s *viewSuite) TestSetNestedContentWithFieldFilter(c *C) {
 	views := map[string]any{
 		"foo": map[string]any{
@@ -6272,7 +6689,7 @@ func (s *viewSuite) TestSetNestedContentWithFieldFilter(c *C) {
 	err = view.Set(bag, "sets", []any{
 		map[string]any{"validation-set": "my-set", "account-id": "ABC123", "snaps": map[string]any{"name": "my-snap"}, "mode": "enforce"},
 		map[string]any{"validation-set": "other-set", "account-id": "FOO321", "snaps": map[string]any{"name": "snapd"}, "mode": "monitor"},
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	val, err := view.Get(bag, "sets", map[string]any{"account-id": "ABC123"}, confdb.AdminAccess)

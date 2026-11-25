@@ -1258,7 +1258,9 @@ func validateSetValue(initial any) error {
 
 // Set sets the named view to a specified non-nil value. Matches that cannot
 // extract their data from the provided value will be considered as being unset.
-func (v *View) Set(databag Databag, request string, value any) error {
+// Optional constraints select the existing data to replace. Whole list entries
+// fill the selected positions in order, with extra entries appended.
+func (v *View) Set(databag Databag, request string, value any, constraints map[string]any) error {
 	if request == "" {
 		return badRequestErrorFrom(v, "set", request, "")
 	}
@@ -1290,33 +1292,81 @@ func (v *View) Set(databag Databag, request string, value any) error {
 	getAccs := func(i int) []Accessor { return matches[i].storagePath }
 	sort.Slice(matches, byAccessor(getAccs))
 
-	var expandedMatches []expandedMatch
+	var removals [][]Accessor
+	var entryRemovals [][]Accessor
+	var writes []pathValuePair
 	suffixes := make([]string, 0, len(matches))
 	for _, match := range matches {
-		pathValuePairs, err := getValuesThroughPaths(match.storagePath, match.unmatchedSuffix, value)
-		if err != nil {
-			if errors.Is(err, &NoDataError{}) {
-				// match has no corresponding data in value, so treat it as removing value.
-				expandedMatches = append(expandedMatches, expandedMatch{
-					storagePath: match.storagePath,
-					value:       nil,
-				})
-				continue
-			}
+		// expand the storage paths using the supplied value, so a write of
+		// 	foo.{x} =  {"a": "b", "c": "d"} becomes two expanded matches:
+		//		foo.a = b and foo.c = d
+		suffixes = append(suffixes, JoinAccessors(match.unmatchedSuffix))
+		pairs, err := getValuesThroughPaths(match.storagePath, match.unmatchedSuffix, value)
+		if err != nil && !errors.Is(err, &NoDataError{}) {
 			return badRequestErrorFrom(v, "set", request, err.Error())
 		}
 
-		for _, pathValuePair := range pathValuePairs {
-			expandedMatches = append(expandedMatches, expandedMatch{
-				storagePath: pathValuePair.path,
-				value:       pathValuePair.value,
-			})
+		// simple case: just write values to paths or, if there's no value, treat it
+		// as removing the value at the stored path.
+		if len(constraints) == 0 {
+			if len(pairs) == 0 {
+				writes = append(writes, pathValuePair{path: match.storagePath})
+			} else {
+				writes = append(writes, pairs...)
+			}
+			continue
 		}
 
-		// store the suffix in a map so we deduplicate them before checking if the
-		// value is used in its entirety
-		suffixPath := JoinAccessors(match.unmatchedSuffix)
-		suffixes = append(suffixes, suffixPath)
+		if len(pairs) == 0 {
+			// there's no data for this match, but before unsetting the path we need
+			// to consider constraints which might narrow the removal's scope
+			pairs = []pathValuePair{{path: match.storagePath}}
+		}
+
+		// group path/value pairs that write to the same list (i.e., by selection path)
+		groups := groupWritePairs(match.storagePath, pairs)
+		for _, group := range groups {
+			path := group.selectionPath
+			adjusted, err := adjustListWrites(group.pairs, databag, path, constraints)
+			if err != nil {
+				return err
+			}
+			if path[len(path)-1].Type() == IndexPlaceholderType {
+				entryRemovals = append(entryRemovals, adjusted.removals...)
+			} else {
+				removals = append(removals, adjusted.removals...)
+			}
+
+			writes = append(writes, adjusted.writes...)
+			for _, write := range adjusted.writes {
+				// Filters belong to objects along the storage path. Use adjusted
+				// indexes when setting their fields, so sibling fields survive.
+				for i, acc := range path {
+					for field, parameter := range acc.FieldFilters() {
+						constraint, ok := constraints[parameter]
+						if !ok {
+							continue
+						}
+
+						if len(write.path) == i+1 {
+							object, ok := write.value.(map[string]any)
+							if !ok {
+								continue
+							}
+
+							if existing, ok := object[field]; ok && !reflect.DeepEqual(existing, constraint) {
+								return fmt.Errorf("cannot write field %q: existing value conflicts with constraint %q", field, parameter)
+							}
+
+							object[field] = constraint
+						} else {
+							fieldPath := appendAccessor(write.path[:i+1], newKey(field, nil))
+							writes = append(writes, pathValuePair{path: fieldPath, value: constraint})
+						}
+					}
+				}
+			}
+		}
 	}
 
 	sort.Strings(suffixes)
@@ -1328,17 +1378,30 @@ func (v *View) Set(databag Databag, request string, value any) error {
 
 	// sort again since we may have unpacked a list into many expanded matches.
 	// Since list Set()s depend on the length of the existing list, the order matters
-	getAccs = func(i int) []Accessor { return expandedMatches[i].storagePath }
-	sort.Slice(expandedMatches, byAccessor(getAccs))
+	sort.SliceStable(writes, byAccessor(func(i int) []Accessor { return writes[i].path }))
 
-	for _, match := range expandedMatches {
-		if err := databag.Set(match.storagePath, match.value); err != nil {
+	// Remove selected fields without replacement values, such as trailing name
+	// fields when a constrained list write supplies fewer values than matches.
+	for _, path := range canonicalizeRemovalPaths(removals) {
+		if err := databag.Unset(path); err != nil {
 			return err
 		}
 	}
 
-	// remove the containers left empty by the databag Sets. This cannot be done
-	// in the databag methods because list item removals can impact subsequent writes.
+	for _, write := range writes {
+		if err := databag.Set(write.path, write.value); err != nil {
+			return err
+		}
+	}
+
+	// Replace entries before removing unused slots so original indexes stay
+	// valid during writes. Canonicalization removes higher list indexes first.
+	for _, path := range canonicalizeRemovalPaths(entryRemovals) {
+		if err := databag.Unset(path); err != nil {
+			return err
+		}
+	}
+
 	if err := databag.PruneEmpty(); err != nil {
 		return err
 	}
@@ -1347,15 +1410,240 @@ func (v *View) Set(databag Databag, request string, value any) error {
 	if err != nil {
 		return err
 	}
-
-	// TODO: when using a transaction, the data only changes on commit so
-	// this is a bit of a waste. Maybe cache the result so we only do the first
-	// validation and then in viewstate on Commit
 	if err := v.schema.DatabagSchema.Validate(data); err != nil {
-		return fmt.Errorf(`cannot write data: %w`, err)
+		return fmt.Errorf("cannot write data: %w", err)
+	}
+	return nil
+}
+
+type writeGroup struct {
+	selectionPath []Accessor
+	pairs         []pathValuePair
+}
+
+// groupWritePairs this maps "selection paths" to a list of concrete path/value
+// pairs. The selection path is a storage path with filled in key placeholders
+// but not index placeholders. We'll use this to find paths pointing to elements
+// of the same list that will then have indexes filled in to replace certains
+// items based on what the subset of data the path/constraints select.
+func groupWritePairs(storagePath []Accessor, pairs []pathValuePair) []writeGroup {
+	var groups []writeGroup
+	groupIndexes := make(map[string]int)
+
+	for _, pair := range pairs {
+		selectionPath := append([]Accessor(nil), storagePath...)
+		for i, acc := range storagePath {
+			if acc.Type() == KeyPlaceholderType && pair.path[i].Type() == MapKeyType {
+				selectionPath[i] = newKey(pair.path[i].Name(), acc.FieldFilters())
+			}
+		}
+
+		key := JoinAccessors(selectionPath)
+		index, ok := groupIndexes[key]
+		if !ok {
+			index = len(groups)
+			groupIndexes[key] = index
+			groups = append(groups, writeGroup{selectionPath: selectionPath})
+		}
+
+		groups[index].pairs = append(groups[index].pairs, pair)
 	}
 
-	return nil
+	return groups
+}
+
+type adjustedWrites struct {
+	writes   []pathValuePair
+	removals [][]Accessor
+}
+
+// adjustListWrites takes path-value pairs and adjusts their indexes to write
+// the correct place according to the selected stored data. For example,
+// groups[0].items[0] can become groups[3].items[2]. Excess input entries are
+// appended and, conversely, unused selections are considered as removals.
+func adjustListWrites(pairs []pathValuePair, bag Databag, path []Accessor, constraints map[string]any) (adjustedWrites, error) {
+	var result adjustedWrites
+	hasValue := false
+	for _, pair := range pairs {
+		if pair.value != nil {
+			hasValue = true
+			break
+		}
+	}
+
+	if !hasValue {
+		// With no replacement value, collect the rule's matching destinations.
+		selected, err := bag.Resolve(path, constraints)
+		return adjustedWrites{removals: selected}, err
+	}
+
+	// we need to find the next index placeholder to adjust the indexes taken
+	// by the write paths
+	position := -1
+	for i, acc := range path {
+		if acc.Type() == IndexPlaceholderType {
+			position = i
+			break
+		}
+	}
+
+	if position == -1 {
+		// no more list indexes to adjust
+		for _, pair := range pairs {
+			if pair.value != nil {
+				result.writes = append(result.writes, pair)
+			} else {
+				return adjustedWrites{}, fmt.Errorf("TODO; ")
+			}
+		}
+
+		return result, nil
+	}
+
+	// resolve the path up to the next list
+	parentPath := path[:position]
+	selected, err := bag.Resolve(path[:position+1], constraints)
+	if err != nil {
+		return adjustedWrites{}, err
+	}
+	sort.Slice(selected, byAccessor(func(i int) []Accessor { return selected[i] }))
+
+	// group descendant paths of the same list index
+	groups := make(map[int][]pathValuePair)
+	var indexes []int
+	for _, pair := range pairs {
+		index, _ := strconv.Atoi(pair.path[position].Name())
+		if _, ok := groups[index]; !ok {
+			indexes = append(indexes, index)
+		}
+		groups[index] = append(groups[index], pair)
+	}
+	sort.Ints(indexes)
+
+	// find out the list length, where we'll put items to be appended
+	nextAppend := 0
+	stored, err := bag.Get(parentPath, nil)
+	if err != nil && !errors.Is(err, &NoDataError{}) {
+		return adjustedWrites{}, err
+	}
+	if err == nil {
+		list, ok := stored.([]any)
+		if !ok {
+			return adjustedWrites{}, fmt.Errorf("cannot write list entries at non-list path %q", JoinAccessors(parentPath))
+		}
+		nextAppend = len(list)
+	}
+
+	for i, inputIndex := range indexes {
+		// these pairs have been adjusted up to the current position, we'll recurse
+		// into this function to repeat the process for the next list
+		var partialAdjusts []pathValuePair
+
+		group := groups[inputIndex]
+
+		var destination []Accessor
+		if i < len(selected) {
+			destination = selected[i]
+		} else {
+			// already filled all the selected indexes, need to start appending
+			destination = appendAccessor(parentPath, newIndex(strconv.Itoa(nextAppend), nil))
+			nextAppend++
+		}
+
+		for _, pair := range group {
+			if pair.value == nil {
+				panic("is this possible?")
+			}
+
+			// use the resolved path up to the list (this will include the right index
+			// to be replaced) plus the remaining of the pair's write path
+			writePath := append(append([]Accessor(nil), destination...), pair.path[position+1:]...)
+			partialAdjusts = append(partialAdjusts, pathValuePair{path: writePath, value: pair.value})
+		}
+
+		childPath := append(append([]Accessor(nil), destination...), path[position+1:]...)
+		child, err := adjustListWrites(partialAdjusts, bag, childPath, constraints)
+		if err != nil {
+			return adjustedWrites{}, err
+		}
+
+		result.writes = append(result.writes, child.writes...)
+		result.removals = append(result.removals, child.removals...)
+	}
+
+	//wholeEntry := position == len(path)-1
+	//for rank, inputIndex := range indexes {
+	//	group := groups[inputIndex]
+	//	hasValue := false
+	//	for _, pair := range group {
+	//		if pair.value != nil {
+	//			hasValue = true
+	//			break
+	//		}
+	//	}
+
+	//	existingEntry := rank < len(selected)
+	//	if !existingEntry && !hasValue {
+	//		continue
+	//	}
+
+	//	var destination []Accessor
+	//	if existingEntry {
+	//		destination = selected[rank]
+	//	} else {
+	//		destination = appendAccessor(parentPath, newIndex(strconv.Itoa(nextAppend), nil))
+	//		nextAppend++
+	//	}
+	//	var childPairs []pathValuePair
+	//	for _, pair := range group {
+	//		writePath := append(append([]Accessor(nil), destination...), pair.path[position+1:]...)
+	//		childPairs = append(childPairs, pathValuePair{path: writePath, value: pair.value})
+	//	}
+
+	//	if wholeEntry {
+	//		for _, pair := range childPairs {
+	//			if pair.value != nil {
+	//				result.writes = append(result.writes, pair)
+	//			}
+	//		}
+	//		if existingEntry && !hasValue {
+	//			result.removals = append(result.removals, destination)
+	//		}
+	//		continue
+	//	}
+
+	//	if !existingEntry {
+	//		// Seed constraint fields only for new containing entries. Existing
+	//		// entries retain their sibling fields during descendant writes.
+	//		fields := make(map[string]any)
+	//		for field, parameter := range path[position].FieldFilters() {
+	//			if value, ok := constraints[parameter]; ok {
+	//				fields[field] = value
+	//			}
+	//		}
+	//		if len(fields) != 0 {
+	//			result.writes = append(result.writes, pathValuePair{path: destination, value: fields})
+	//		}
+	//	}
+	//	childPath := append(append([]Accessor(nil), destination...), path[position+1:]...)
+	//	child, err := adjustListWrites(childPairs, bag, childPath, constraints)
+	//	if err != nil {
+	//		return adjustedWrites{}, err
+	//	}
+	//	result.writes = append(result.writes, child.writes...)
+	//	result.removals = append(result.removals, child.removals...)
+	//}
+
+	// Omitted input removes only destinations covered by the remaining rule.
+	for rank := len(indexes); rank < len(selected); rank++ {
+		childPath := append(append([]Accessor(nil), selected[rank]...), path[position+1:]...)
+		unused, err := bag.Resolve(childPath, constraints)
+		if err != nil {
+			return adjustedWrites{}, err
+		}
+		result.removals = append(result.removals, unused...)
+	}
+	return result, nil
 }
 
 type accGetter func(i int) []Accessor
@@ -1587,7 +1875,13 @@ func schemaTypesStr(types []SchemaType) string {
 // will be used to complete the storage path.
 var getValuesThroughPaths = getValuesThroughPathsImpl
 
+// pathValuePair contains a storage path expanded using input keys and indexes,
+// and the value to write there. List indexes may be adjusted before writing.
 type pathValuePair struct {
+	// path is a storage path with placeholders filled in both from the initial
+	// matched request path and the value itself. For example, if we have a rule:
+	// 'storage: foo.{bar}' and we set 'foo = {"a":"b"}', then the path here will
+	// be "foo.a" the value will be "b").
 	path  []Accessor
 	value any
 }
@@ -2079,6 +2373,8 @@ func (v *View) CheckAllConstraintsAreUsed(op string, requests []string, constrai
 
 // ValidateConstraints checks that every constraint value is a non-null scalar.
 func ValidateConstraints(constraints map[string]any) error {
+	// TODO: reject anything other than a string (for now) and move the call site
+	// to confdbstate (so it covers API, snapctl & devicemgmt)
 	for k, v := range constraints {
 		var typeStr string
 		switch v.(type) {

@@ -315,7 +315,7 @@ func (s *confdbHandlerSuite) TestUpdateEntireValidationSet(c *C) {
 	c.Assert(err, IsNil)
 
 	// set the entire validation set map
-	err = s.view.Set(tx, "my-account.my-set", map[string]any{"mode": "enforce", "pinned-sequence": 5})
+	err = s.view.Set(tx, "my-account.my-set", map[string]any{"mode": "enforce", "pinned-sequence": 5}, nil)
 	c.Assert(err, IsNil)
 
 	handler := &assertstateconfdb.ValsetsConfdbHandler{}
@@ -345,7 +345,7 @@ func (s *confdbHandlerSuite) TestCommitUpdatesOnlyMode(c *C) {
 	c.Assert(err, IsNil)
 
 	// set specific path and check other data isn't affected
-	err = s.view.Set(tx, "my-account.valid-set.mode", "monitor")
+	err = s.view.Set(tx, "my-account.valid-set.mode", "monitor", nil)
 	c.Assert(err, IsNil)
 
 	handler := &assertstateconfdb.ValsetsConfdbHandler{}
@@ -362,7 +362,7 @@ func (s *confdbHandlerSuite) TestCommitUpdatesOnlyMode(c *C) {
 	tx, err = confdbstate.NewTransaction(s.st, "system", "validation-sets")
 	c.Assert(err, IsNil)
 
-	err = s.view.Set(tx, "my-account.valid-set", map[string]any{"mode": "enforce"})
+	err = s.view.Set(tx, "my-account.valid-set", map[string]any{"mode": "enforce"}, nil)
 	c.Assert(err, IsNil)
 
 	_, err = handler.Commit(s.st, tx)
@@ -425,7 +425,7 @@ func (s *confdbHandlerSuite) TestCannotUnsetMode(c *C) {
 
 	err = s.view.Set(tx, "my-account.my-set", map[string]any{
 		"pinned-sequence": 5,
-	})
+	}, nil)
 	c.Assert(err, ErrorMatches, `.*cannot find required combinations of keys`)
 
 	// unsetting mode fails because the storage schema marks it as required
@@ -527,17 +527,17 @@ func (s *confdbHandlerSuite) TestCommitMultipleSetsAcrossAccounts(c *C) {
 	err = s.view.Set(tx, "acct1.set-a", map[string]any{
 		"mode":            "enforce",
 		"pinned-sequence": 1,
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 	err = s.view.Set(tx, "acct1.set-b", map[string]any{
 		"mode":            "monitor",
 		"pinned-sequence": 1,
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 	err = s.view.Set(tx, "acct2.set-c", map[string]any{
 		"mode":            "monitor",
 		"pinned-sequence": 2,
-	})
+	}, nil)
 	c.Assert(err, IsNil)
 
 	handler := &assertstateconfdb.ValsetsConfdbHandler{}
@@ -579,7 +579,7 @@ func (s *confdbHandlerSuite) TestCommitFailsIfEnforcingUnknownSequence(c *C) {
 	c.Assert(err, IsNil)
 
 	// pin to a sequence that has no local assertion
-	err = s.view.Set(tx, "my-account.my-set", map[string]any{"mode": "enforce", "pinned-sequence": 99})
+	err = s.view.Set(tx, "my-account.my-set", map[string]any{"mode": "enforce", "pinned-sequence": 99}, nil)
 	c.Assert(err, IsNil)
 
 	handler := &assertstateconfdb.ValsetsConfdbHandler{}
@@ -615,8 +615,8 @@ func (s *confdbHandlerSuite) TestCommitEnforceFailureLeavesStateUnchanged(c *C) 
 	c.Assert(err, IsNil)
 
 	// enforcing my-set will fail due to a missing snap, so state shouldn't change
-	c.Assert(s.view.Set(tx, "my-account.my-set.mode", "enforce"), IsNil)
-	c.Assert(s.view.Set(tx, "my-account.valid-set.mode", "monitor"), IsNil)
+	c.Assert(s.view.Set(tx, "my-account.my-set.mode", "enforce", nil), IsNil)
+	c.Assert(s.view.Set(tx, "my-account.valid-set.mode", "monitor", nil), IsNil)
 	c.Assert(s.view.Unset(tx, "my-account.another-valid-set", nil), IsNil)
 
 	handler := &assertstateconfdb.ValsetsConfdbHandler{}
@@ -650,8 +650,8 @@ func (s *confdbHandlerSuite) TestCommitMonitorFailureDoesNotRollbackEnforce(c *C
 	c.Assert(err, IsNil)
 
 	// the monitor change will fail but the enforcement isn't rolled back
-	c.Assert(s.view.Set(tx, "my-account.valid-set.mode", "enforce"), IsNil)
-	c.Assert(s.view.Set(tx, "my-account.nonexistent-set.mode", "monitor"), IsNil)
+	c.Assert(s.view.Set(tx, "my-account.valid-set.mode", "enforce", nil), IsNil)
+	c.Assert(s.view.Set(tx, "my-account.nonexistent-set.mode", "monitor", nil), IsNil)
 
 	handler := &assertstateconfdb.ValsetsConfdbHandler{}
 	_, err = handler.Commit(s.st, tx)
@@ -706,8 +706,8 @@ func (s *confdbHandlerSuite) TestCommitForgetFailureDoesNotRollbackEnforceOrMoni
 	c.Assert(err, IsNil)
 
 	// these will succeed
-	c.Assert(s.view.Set(tx, "my-account.another-valid-set.mode", "enforce"), IsNil)
-	c.Assert(s.view.Set(tx, "my-account.my-set.mode", "monitor"), IsNil)
+	c.Assert(s.view.Set(tx, "my-account.another-valid-set.mode", "enforce", nil), IsNil)
+	c.Assert(s.view.Set(tx, "my-account.my-set.mode", "monitor", nil), IsNil)
 	// but this will fail (enforced by the model)
 	c.Assert(s.view.Unset(tx, "my-account.valid-set", nil), IsNil)
 

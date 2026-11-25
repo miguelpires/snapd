@@ -70,7 +70,7 @@ func setViaView(bag confdb.Databag, view *confdb.View, requests map[string]any) 
 		if value == nil {
 			err = view.Unset(bag, request, nil)
 		} else {
-			err = view.Set(bag, request, value)
+			err = view.Set(bag, request, value, nil)
 		}
 
 		if err != nil {

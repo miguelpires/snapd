@@ -127,7 +127,7 @@ func (s *transactionTestSuite) TestCommitPreservesPruningBoundaries(c *C) {
 	c.Assert(err, IsNil)
 	err = view.Unset(tx, "users[0].name", nil)
 	c.Assert(err, IsNil)
-	err = view.Set(tx, "users[0].name", "updated")
+	err = view.Set(tx, "users[0].name", "updated", nil)
 	c.Assert(err, IsNil)
 
 	users, err := tx.Get(parsePath(c, "users"), nil)
